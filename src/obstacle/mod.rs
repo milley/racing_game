@@ -3,6 +3,19 @@ use rand::Rng;
 
 use crate::{GameConfig, game::{GameEntity, GameState}, player::{Player, PlayerConfig}};
 
+/// AABB 碰撞检测
+/// 检测两个矩形是否碰撞
+#[inline]
+fn check_aabb_collision(
+    pos_a: Vec2,
+    half_size_a: Vec2,
+    pos_b: Vec2,
+    half_size_b: Vec2,
+) -> bool {
+    (pos_a.x - pos_b.x).abs() < half_size_a.x + half_size_b.x
+        && (pos_a.y - pos_b.y).abs() < half_size_a.y + half_size_b.y
+}
+
 /// 障碍物插件
 pub struct ObstaclePlugin;
 
@@ -137,9 +150,7 @@ fn check_collisions(
         let obstacle_half = Vec2::new(config.width / 2.0, config.height / 2.0);
 
         // AABB 碰撞检测
-        if (player_pos.x - obstacle_pos.x).abs() < player_half.x + obstacle_half.x
-            && (player_pos.y - obstacle_pos.y).abs() < player_half.y + obstacle_half.y
-        {
+        if check_aabb_collision(player_pos, player_half, obstacle_pos, obstacle_half) {
             // 碰撞！游戏结束
             next_state.set(GameState::GameOver);
         }

@@ -5,6 +5,8 @@ mod game;
 mod player;
 mod road;
 mod obstacle;
+#[cfg(test)]
+mod tests;
 
 fn main() {
     App::new()
@@ -32,13 +34,13 @@ struct WindowConfig;
 
 /// 游戏配置
 #[derive(Resource)]
-struct GameConfig {
+pub struct GameConfig {
     /// 道路宽度
-    road_width: f32,
+    pub road_width: f32,
     /// 道路边距
-    road_margin: f32,
+    pub road_margin: f32,
     /// 游戏速度
-    base_speed: f32,
+    pub base_speed: f32,
 }
 
 impl Default for GameConfig {
