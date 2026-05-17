@@ -241,7 +241,7 @@ fn spawn_player_graphics(
         let pixel_size = config.pixel_size;
         let mut pixel_entities = Vec::new();
 
-        // 为每个像素生成一个精灵
+        // 为每个像素生成一个精灵（不添加 GameEntity，随父实体一起删除）
         for (px, py, color) in PLAYER_CAR_PIXELS {
             let entity = commands.spawn((
                 Sprite::from_color(
@@ -250,7 +250,6 @@ fn spawn_player_graphics(
                 ),
                 Transform::from_xyz(px * pixel_size, py * pixel_size, 0.1),
                 PixelPart,
-                crate::game::GameEntity,
             )).id();
             pixel_entities.push(entity);
         }
@@ -268,7 +267,7 @@ fn spawn_player_graphics(
 
 /// 像素部件标记
 #[derive(Component)]
-struct PixelPart;
+pub struct PixelPart;
 
 /// 更新玩家图形（无敌闪烁）
 fn update_player_graphics(
@@ -316,6 +315,7 @@ fn update_obstacle_graphics(
         let mut pixel_entities = Vec::new();
         let size_mult = car_type.0.size_multiplier();
 
+        // 像素实体不添加 GameEntity，随父实体一起删除
         for (px, py, color) in &pixels {
             let pixel_entity = commands.spawn((
                 Sprite::from_color(
@@ -328,7 +328,6 @@ fn update_obstacle_graphics(
                     0.1,
                 ),
                 PixelPart,
-                crate::game::GameEntity,
             )).id();
             pixel_entities.push(pixel_entity);
         }

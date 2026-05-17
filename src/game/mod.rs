@@ -228,7 +228,20 @@ fn setup_game(
 }
 
 /// 清理游戏
-fn cleanup_game(mut commands: Commands, query: Query<Entity, With<GameEntity>>) {
+fn cleanup_game(
+    mut commands: Commands,
+    query: Query<Entity, With<GameEntity>>,
+    pixel_query: Query<Entity, With<crate::graphics::PixelPart>>,
+    particle_query: Query<Entity, With<crate::particle::ExplosionParticle>>,
+) {
+    // 先清理像素和粒子（子实体）
+    for entity in pixel_query.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in particle_query.iter() {
+        commands.entity(entity).despawn();
+    }
+    // 再清理游戏实体（父实体）
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }

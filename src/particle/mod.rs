@@ -48,7 +48,7 @@ impl Default for ParticleConfig {
 
 /// 爆炸粒子标记
 #[derive(Component)]
-struct ExplosionParticle {
+pub struct ExplosionParticle {
     /// 剩余生命时间
     lifetime: f32,
     /// 速度

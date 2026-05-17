@@ -57,6 +57,8 @@ pub struct Curvature {
     pub target: f32,
     /// 曲率变化速度
     pub transition_speed: f32,
+    /// 曲率持续时间计时器
+    curve_timer: f32,
 }
 
 impl Default for Curvature {
@@ -64,7 +66,8 @@ impl Default for Curvature {
         Self {
             value: 0.0,
             target: 0.0,
-            transition_speed: 0.5,
+            transition_speed: 2.0,
+            curve_timer: 0.0,
         }
     }
 }
@@ -81,8 +84,6 @@ struct RoadLine {
 /// 路边装饰标记
 #[derive(Component)]
 struct RoadsideDecoration {
-    /// 原始Y位置
-    base_y: f32,
     /// 是否左侧
     is_left: bool,
 }
@@ -105,7 +106,7 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
 
     // 道路边界装饰（红白条纹）
     let stripe_height = 40.0_f32;
-    let stripe_count = (800.0_f32 / stripe_height).ceil() as i32 + 1;
+    let stripe_count = (800.0_f32 / stripe_height).ceil() as i32 + 2;
 
     // 左边界
     for i in 0..stripe_count {
@@ -120,7 +121,7 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
         commands.spawn((
             Sprite::from_color(color, Vec2::new(15.0, stripe_height)),
             Transform::from_xyz(-game_config.road_width / 2.0 - 10.0, y, 0.3),
-            RoadsideDecoration { base_y: y, is_left: true },
+            RoadsideDecoration { is_left: true },
             GameEntity,
         ));
     }
@@ -138,7 +139,7 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
         commands.spawn((
             Sprite::from_color(color, Vec2::new(15.0, stripe_height)),
             Transform::from_xyz(game_config.road_width / 2.0 + 10.0, y, 0.3),
-            RoadsideDecoration { base_y: y, is_left: false },
+            RoadsideDecoration { is_left: false },
             GameEntity,
         ));
     }
@@ -160,7 +161,7 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
 
     // 中央虚线（黄色）
     let total_height = road_config.line_height + road_config.line_gap;
-    let line_count = (800.0 / total_height).ceil() as i32 + 1;
+    let line_count = (800.0 / total_height).ceil() as i32 + 2;
 
     for i in 0..line_count {
         let y = (i as f32 - line_count as f32 / 2.0) * total_height;
@@ -193,57 +194,76 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
     }
 }
 
-/// 更新道路标线（只滚动，不左右移动）
+/// 计算弯道偏移
+/// y_pos: 当前Y位置
+/// curvature: 曲率值 (-1 到 1)
+/// 返回X偏移量
+fn calculate_curve_offset(y_pos: f32, curvature: f32) -> f32 {
+    // 透视因子：远处(y大)偏移大，近处(y小)偏移小
+    // y范围: -400(近) 到 400(远)
+    let y_normalized = (y_pos + 400.0) / 800.0; // 0 到 1
+    let perspective = y_normalized * y_normalized; // 二次曲线，远处变化更剧烈
+
+    // 弯道偏移：远处偏移大
+    curvature * perspective * 100.0
+}
+
+/// 更新道路标线（滚动 + 弯道效果）
 fn update_road_lines(
     mut query: Query<(&mut Transform, &mut RoadLine)>,
     road_config: Res<RoadConfig>,
     difficulty: Res<Difficulty>,
+    curvature: Res<Curvature>,
     time: Res<Time>,
 ) {
     let total_height = road_config.line_height + road_config.line_gap;
     let adjusted_speed = road_config.scroll_speed * difficulty.speed_multiplier;
 
     for (mut transform, mut road_line) in query.iter_mut() {
-        // 只进行垂直滚动
+        // 垂直滚动
         road_line.offset -= adjusted_speed * time.delta_secs();
 
-        if road_line.offset < -400.0 - total_height {
-            road_line.offset += total_height * 10.0;
+        // 循环滚动
+        if road_line.offset < -450.0 {
+            road_line.offset += total_height * 12.0;
         }
 
         transform.translation.y = road_line.offset;
-        // 保持原始X位置，不随弯道移动
-        transform.translation.x = road_line.base_x;
+
+        // 弯道效果：根据Y位置和曲率计算X偏移
+        let curve_offset = calculate_curve_offset(road_line.offset, curvature.value);
+        transform.translation.x = road_line.base_x + curve_offset;
     }
 }
 
-/// 更新路边装饰（滚动 + 轻微弯道效果）
+/// 更新路边装饰（滚动 + 弯道效果）
 fn update_roadside_decorations(
-    mut query: Query<(&mut Transform, &RoadsideDecoration)>,
+    mut query: Query<(&mut Transform, &mut Sprite, &RoadsideDecoration)>,
     difficulty: Res<Difficulty>,
     curvature: Res<Curvature>,
+    game_config: Res<GameConfig>,
     time: Res<Time>,
 ) {
     let speed = 200.0 * difficulty.speed_multiplier;
+    let stripe_height = 40.0;
 
-    for (mut transform, decoration) in query.iter_mut() {
+    for (mut transform, _sprite, decoration) in query.iter_mut() {
         // 垂直滚动
         transform.translation.y -= speed * time.delta_secs();
 
         // 循环滚动
-        if transform.translation.y < -400.0 {
-            transform.translation.y += 800.0;
+        if transform.translation.y < -420.0 {
+            transform.translation.y += stripe_height * 22.0;
         }
 
-        // 弯道效果：路边装饰根据曲率和Y位置轻微偏移
-        // 远处的偏移更大，近处偏移小（模拟透视）
-        let y_normalized = (transform.translation.y / 400.0).clamp(-1.0, 1.0);
-        let perspective_factor = (1.0 - y_normalized.abs()) * 0.5 + 0.5; // 远处大，近处小
-        let curve_offset = curvature.value * perspective_factor * 20.0;
-
-        // 左右两侧偏移方向相反
-        let direction = if decoration.is_left { -1.0 } else { 1.0 };
-        transform.translation.x = direction * (150.0 + 10.0) + curve_offset;
+        // 弯道效果
+        let curve_offset = calculate_curve_offset(transform.translation.y, curvature.value);
+        let base_x = if decoration.is_left {
+            -game_config.road_width / 2.0 - 10.0
+        } else {
+            game_config.road_width / 2.0 + 10.0
+        };
+        transform.translation.x = base_x + curve_offset;
     }
 }
 
@@ -256,8 +276,19 @@ fn update_curvature(
     let diff = curvature.target - curvature.value;
     curvature.value += diff * curvature.transition_speed * time.delta_secs();
 
-    // 随机改变目标曲率（模拟弯道）
-    if rand::random::<f32>() < 0.003 {
-        curvature.target = (rand::random::<f32>() - 0.5) * 0.8;
+    // 曲率持续时间
+    curvature.curve_timer -= time.delta_secs();
+
+    // 当曲率稳定后，随机改变目标曲率
+    if curvature.curve_timer <= 0.0 && diff.abs() < 0.1 {
+        // 随机选择新的弯道方向
+        // 曲率范围: -1.5 到 1.5 (更大的弯道)
+        curvature.target = if rand::random::<f32>() < 0.5 {
+            (rand::random::<f32>() - 0.5) * 3.0  // -1.5 到 1.5
+        } else {
+            0.0  // 直道
+        };
+        // 设置持续时间（2-5秒）
+        curvature.curve_timer = 2.0 + rand::random::<f32>() * 3.0;
     }
 }
