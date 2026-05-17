@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::{GameConfig, game::{GameEntity, GameState}};
+use crate::{GameConfig, game::{GameEntity, GameState, Difficulty}};
 
 /// 道路插件
 pub struct RoadPlugin;
@@ -107,13 +107,16 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
 fn update_road_lines(
     mut query: Query<(&mut Transform, &mut RoadLine)>,
     road_config: Res<RoadConfig>,
+    difficulty: Res<Difficulty>,
     time: Res<Time>,
 ) {
     let total_height = road_config.line_height + road_config.line_gap;
+    // 根据难度调整滚动速度
+    let adjusted_speed = road_config.scroll_speed * difficulty.speed_multiplier;
 
     for (mut transform, mut road_line) in query.iter_mut() {
         // 向下移动
-        road_line.offset -= road_config.scroll_speed * time.delta_secs();
+        road_line.offset -= adjusted_speed * time.delta_secs();
 
         // 循环滚动
         if road_line.offset < -400.0 - total_height {

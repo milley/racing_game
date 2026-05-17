@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::{GameConfig, game::{GameEntity, GameState}, player::{Player, PlayerConfig}};
+use crate::{GameConfig, game::{GameEntity, GameState, Difficulty}, player::{Player, PlayerConfig}};
 
 /// AABB 碰撞检测
 /// 检测两个矩形是否碰撞
@@ -84,9 +84,14 @@ fn spawn_obstacles(
     mut timer: ResMut<ObstacleTimer>,
     config: Res<ObstacleConfig>,
     game_config: Res<GameConfig>,
+    difficulty: Res<Difficulty>,
     time: Res<Time>,
 ) {
     timer.0.tick(time.delta());
+
+    // 根据难度调整生成间隔
+    let adjusted_interval = config.spawn_interval * difficulty.spawn_interval_multiplier;
+    timer.0.set_duration(std::time::Duration::from_secs_f32(adjusted_interval));
 
     if timer.0.just_finished() {
         // 随机位置
@@ -118,10 +123,14 @@ fn move_obstacles(
     mut commands: Commands,
     mut query: Query<(Entity, &mut Transform), With<Obstacle>>,
     config: Res<ObstacleConfig>,
+    difficulty: Res<Difficulty>,
     time: Res<Time>,
 ) {
+    // 根据难度调整速度
+    let adjusted_speed = config.speed * difficulty.speed_multiplier;
+
     for (entity, mut transform) in query.iter_mut() {
-        transform.translation.y -= config.speed * time.delta_secs();
+        transform.translation.y -= adjusted_speed * time.delta_secs();
 
         // 移出屏幕后删除
         if transform.translation.y < -400.0 {
