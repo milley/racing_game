@@ -57,12 +57,14 @@ fn spawn_player(
     let start_x = 0.0;
     let start_y = -220.0;
 
+    // 玩家实体（不包含Sprite，由像素图形系统处理）
     commands.spawn((
-        Sprite::from_color(Color::srgb(0.0, 0.5, 1.0), Vec2::new(config.width, config.height)),
         Transform::from_xyz(start_x, start_y, 1.0),
         Player,
         PlayerPosition(Vec2::new(start_x, start_y)),
         GameEntity,
+        // 添加一个小的碰撞箱指示器（半透明）
+        Sprite::from_color(Color::srgba(0.0, 0.5, 1.0, 0.0), Vec2::new(config.width, config.height)),
     ));
 }
 

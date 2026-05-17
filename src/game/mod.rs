@@ -8,6 +8,7 @@ use crate::{
     life::LifePlugin,
     powerup::PowerUpPlugin,
     audio::AudioPlugin,
+    graphics::PixelGraphicsPlugin,
 };
 
 /// 游戏状态
@@ -79,6 +80,7 @@ impl Plugin for GamePlugin {
                 LifePlugin,
                 PowerUpPlugin,
                 AudioPlugin,
+                PixelGraphicsPlugin,
             ))
             // 启动时生成相机（只生成一次）
             .add_systems(Startup, setup_camera)

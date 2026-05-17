@@ -9,6 +9,7 @@ mod particle;
 mod life;
 mod powerup;
 mod audio;
+mod graphics;
 #[cfg(test)]
 mod tests;
 
