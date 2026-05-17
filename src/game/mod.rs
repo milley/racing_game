@@ -1,6 +1,14 @@
 use bevy::prelude::*;
 
-use crate::{obstacle::ObstaclePlugin, player::PlayerPlugin, road::RoadPlugin};
+use crate::{
+    obstacle::ObstaclePlugin,
+    player::PlayerPlugin,
+    road::RoadPlugin,
+    particle::ParticlePlugin,
+    life::LifePlugin,
+    powerup::PowerUpPlugin,
+    audio::AudioPlugin,
+};
 
 /// 游戏状态
 #[derive(States, Default, Clone, Copy, Eq, PartialEq, Debug, Hash)]
@@ -63,7 +71,15 @@ impl Plugin for GamePlugin {
             .init_resource::<Difficulty>()
             .init_resource::<GameTimer>()
             // 添加子插件
-            .add_plugins((PlayerPlugin, RoadPlugin, ObstaclePlugin))
+            .add_plugins((
+                PlayerPlugin,
+                RoadPlugin,
+                ObstaclePlugin,
+                ParticlePlugin,
+                LifePlugin,
+                PowerUpPlugin,
+                AudioPlugin,
+            ))
             // 启动时生成相机（只生成一次）
             .add_systems(Startup, setup_camera)
             // 添加系统

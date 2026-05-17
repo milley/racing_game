@@ -1,7 +1,18 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::{GameConfig, game::{GameEntity, GameState, Difficulty}, player::{Player, PlayerConfig}};
+use crate::{
+    GameConfig,
+    game::{GameEntity, GameState, Difficulty},
+    player::{Player, PlayerConfig},
+    life::{PlayerLife, LifeConfig, handle_collision},
+    powerup::ActivePowerUps,
+    particle::{spawn_explosion, ParticleConfig},
+};
+
+/// 障碍物实体标记（公开供其他模块使用）
+#[derive(Component)]
+pub struct Obstacle;
 
 /// AABB 碰撞检测
 /// 检测两个矩形是否碰撞
@@ -65,10 +76,6 @@ impl Default for ObstacleConfig {
 /// 障碍物生成计时器
 #[derive(Resource)]
 struct ObstacleTimer(Timer);
-
-/// 障碍物实体标记
-#[derive(Component)]
-struct Obstacle;
 
 /// 设置障碍物计时器
 fn setup_obstacle_timer(mut commands: Commands, config: Res<ObstacleConfig>) {
@@ -141,9 +148,14 @@ fn move_obstacles(
 
 /// 碰撞检测
 fn check_collisions(
+    mut commands: Commands,
     mut next_state: ResMut<NextState<GameState>>,
+    mut player_life: ResMut<PlayerLife>,
+    life_config: Res<LifeConfig>,
+    active_powerups: Res<ActivePowerUps>,
+    particle_config: Res<ParticleConfig>,
     player_query: Query<&Transform, With<Player>>,
-    obstacle_query: Query<&Transform, With<Obstacle>>,
+    obstacle_query: Query<(Entity, &Transform), With<Obstacle>>,
     config: Res<ObstacleConfig>,
     player_config: Res<PlayerConfig>,
 ) {
@@ -154,14 +166,31 @@ fn check_collisions(
     let player_pos = player_transform.translation.truncate();
     let player_half = Vec2::new(player_config.width / 2.0, player_config.height / 2.0);
 
-    for obstacle_transform in obstacle_query.iter() {
+    for (obstacle_entity, obstacle_transform) in obstacle_query.iter() {
         let obstacle_pos = obstacle_transform.translation.truncate();
         let obstacle_half = Vec2::new(config.width / 2.0, config.height / 2.0);
 
         // AABB 碰撞检测
         if check_aabb_collision(player_pos, player_half, obstacle_pos, obstacle_half) {
-            // 碰撞！游戏结束
-            next_state.set(GameState::GameOver);
+            // 检查护盾
+            if active_powerups.has_shield {
+                // 有护盾，销毁障碍物但不受伤
+                spawn_explosion(&mut commands, obstacle_transform.translation, &particle_config);
+                commands.entity(obstacle_entity).despawn();
+                continue;
+            }
+
+            // 生成碰撞粒子效果
+            spawn_explosion(&mut commands, player_transform.translation, &particle_config);
+
+            // 销毁障碍物
+            commands.entity(obstacle_entity).despawn();
+
+            // 处理生命
+            if handle_collision(&mut player_life, &life_config) {
+                // 游戏结束
+                next_state.set(GameState::GameOver);
+            }
         }
     }
 }

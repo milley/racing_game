@@ -5,6 +5,10 @@ mod game;
 mod player;
 mod road;
 mod obstacle;
+mod particle;
+mod life;
+mod powerup;
+mod audio;
 #[cfg(test)]
 mod tests;
 
