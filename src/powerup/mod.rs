@@ -207,7 +207,6 @@ fn collect_powerups(
 /// 更新激活的道具效果
 fn update_active_powerups(
     mut active_powerups: ResMut<ActivePowerUps>,
-    mut player_query: Query<&mut Sprite, (With<Player>, Without<crate::graphics::PixelPart>)>,
     mut pixel_query: Query<&mut Sprite, With<crate::graphics::PixelPart>>,
     player_graphics_query: Query<&crate::graphics::PixelGraphics, With<Player>>,
     time: Res<Time>,
@@ -217,18 +216,9 @@ fn update_active_powerups(
 
         if active_powerups.shield_timer <= 0.0 {
             active_powerups.has_shield = false;
-            // 恢复正常
-            if let Ok(mut sprite) = player_query.single_mut() {
-                sprite.color = Color::srgb(0.0, 0.5, 1.0);
-            }
         } else {
             // 护盾闪烁效果
             let pulse = (time.elapsed_secs() * 4.0).sin() * 0.3 + 0.7;
-
-            // 更新玩家主 Sprite
-            if let Ok(mut sprite) = player_query.single_mut() {
-                sprite.color = Color::srgb(0.0, 0.5 + pulse * 0.5, 1.0);
-            }
 
             // 更新像素图形的颜色（同步护盾效果）
             if let Ok(graphics) = player_graphics_query.single() {

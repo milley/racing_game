@@ -5,7 +5,6 @@
 use bevy::prelude::*;
 
 use crate::game::GameState;
-use crate::player::Player;
 
 /// 生命插件
 pub struct LifePlugin;
@@ -91,7 +90,6 @@ fn spawn_life_ui(mut commands: Commands) {
 /// 更新无敌状态
 fn update_invincibility(
     mut player_life: ResMut<PlayerLife>,
-    mut player_query: Query<&mut Sprite, With<Player>>,
     time: Res<Time>,
 ) {
     if player_life.is_invincible {
@@ -99,16 +97,6 @@ fn update_invincibility(
 
         if player_life.invincibility_timer <= 0.0 {
             player_life.is_invincible = false;
-            // 恢复可见
-            if let Ok(mut sprite) = player_query.single_mut() {
-                sprite.color.set_alpha(1.0);
-            }
-        } else {
-            // 闪烁效果
-            if let Ok(mut sprite) = player_query.single_mut() {
-                let blink = (time.elapsed_secs() * 8.0).sin() > 0.0;
-                sprite.color.set_alpha(if blink { 0.3 } else { 1.0 });
-            }
         }
     }
 }
