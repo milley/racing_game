@@ -88,6 +88,7 @@ pub fn spawn_explosion(
         // 随机大小
         let size = 3.0 + rng.gen::<f32>() * 5.0;
 
+        // 爆炸粒子不需要 GameEntity 标记，它们有自己的生命周期管理
         commands.spawn((
             Sprite::from_color(color, Vec2::new(size, size)),
             Transform::from_translation(position),
@@ -95,7 +96,6 @@ pub fn spawn_explosion(
                 lifetime: config.particle_lifetime,
                 velocity,
             },
-            GameEntity,
         ));
     }
 }
