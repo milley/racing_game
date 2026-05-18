@@ -207,7 +207,9 @@ fn collect_powerups(
 /// 更新激活的道具效果
 fn update_active_powerups(
     mut active_powerups: ResMut<ActivePowerUps>,
-    mut player_query: Query<&mut Sprite, With<Player>>,
+    mut player_query: Query<&mut Sprite, (With<Player>, Without<crate::graphics::PixelPart>)>,
+    mut pixel_query: Query<&mut Sprite, With<crate::graphics::PixelPart>>,
+    player_graphics_query: Query<&crate::graphics::PixelGraphics, With<Player>>,
     time: Res<Time>,
 ) {
     if active_powerups.has_shield {
@@ -215,15 +217,35 @@ fn update_active_powerups(
 
         if active_powerups.shield_timer <= 0.0 {
             active_powerups.has_shield = false;
-            // 恢复正常颜色
+            // 恢复正常
             if let Ok(mut sprite) = player_query.single_mut() {
                 sprite.color = Color::srgb(0.0, 0.5, 1.0);
             }
         } else {
             // 护盾闪烁效果
+            let pulse = (time.elapsed_secs() * 4.0).sin() * 0.3 + 0.7;
+
+            // 更新玩家主 Sprite
             if let Ok(mut sprite) = player_query.single_mut() {
-                let pulse = (time.elapsed_secs() * 4.0).sin() * 0.3 + 0.7;
                 sprite.color = Color::srgb(0.0, 0.5 + pulse * 0.5, 1.0);
+            }
+
+            // 更新像素图形的颜色（同步护盾效果）
+            if let Ok(graphics) = player_graphics_query.single() {
+                for &pixel_entity in &graphics.pixels {
+                    if let Ok(mut sprite) = pixel_query.get_mut(pixel_entity) {
+                        // 给像素添加青色光晕效果
+                        let base = sprite.color.to_srgba();
+                        let shield_tint = Color::srgb(0.2, 0.8, 1.0).to_srgba();
+                        // 混合颜色
+                        sprite.color = Color::srgba(
+                            base.red * 0.7 + shield_tint.red * 0.3 * pulse,
+                            base.green * 0.7 + shield_tint.green * 0.3 * pulse,
+                            base.blue * 0.7 + shield_tint.blue * 0.3 * pulse,
+                            base.alpha,
+                        );
+                    }
+                }
             }
         }
     }
