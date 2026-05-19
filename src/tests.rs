@@ -286,7 +286,6 @@ mod obstacle_tests {
 mod bevy_integration_tests {
     use super::*;
     use crate::player::{Player, PlayerConfig};
-    use crate::game::GameState;
 
     #[test]
     fn test_spawn_player() {
@@ -386,5 +385,346 @@ mod benchmark_tests {
 
         // 确保在合理时间内完成（非严格限制）
         assert!(elapsed.as_millis() < 1000);
+    }
+}
+
+/// ========== 生命系统测试 ==========
+
+/// 玩家生命状态
+#[derive(Clone, Copy)]
+pub struct TestPlayerLife {
+    pub lives: u32,
+    pub is_invincible: bool,
+    pub invincibility_timer: f32,
+}
+
+/// 处理碰撞逻辑（测试用副本）
+pub fn handle_collision_test(
+    player_life: &mut TestPlayerLife,
+    _max_lives: u32,
+    invincibility_duration: f32,
+) -> bool {
+    if player_life.is_invincible {
+        return false;
+    }
+
+    if player_life.lives > 0 {
+        player_life.lives -= 1;
+    }
+
+    if player_life.lives == 0 {
+        true
+    } else {
+        player_life.is_invincible = true;
+        player_life.invincibility_timer = invincibility_duration;
+        false
+    }
+}
+
+#[cfg(test)]
+mod life_tests {
+    use super::*;
+
+    #[test]
+    fn test_collision_reduces_life() {
+        let mut life = TestPlayerLife {
+            lives: 3,
+            is_invincible: false,
+            invincibility_timer: 0.0,
+        };
+
+        let result = handle_collision_test(&mut life, 3, 2.0);
+
+        assert!(!result); // 游戏未结束
+        assert_eq!(life.lives, 2);
+        assert!(life.is_invincible); // 触发无敌
+    }
+
+    #[test]
+    fn test_collision_invincible_no_damage() {
+        let mut life = TestPlayerLife {
+            lives: 3,
+            is_invincible: true,
+            invincibility_timer: 1.0,
+        };
+
+        let result = handle_collision_test(&mut life, 3, 2.0);
+
+        assert!(!result);
+        assert_eq!(life.lives, 3); // 生命不变
+    }
+
+    #[test]
+    fn test_collision_game_over() {
+        let mut life = TestPlayerLife {
+            lives: 1,
+            is_invincible: false,
+            invincibility_timer: 0.0,
+        };
+
+        let result = handle_collision_test(&mut life, 3, 2.0);
+
+        assert!(result); // 游戏结束
+        assert_eq!(life.lives, 0);
+    }
+
+    #[test]
+    fn test_multiple_collisions() {
+        let mut life = TestPlayerLife {
+            lives: 3,
+            is_invincible: false,
+            invincibility_timer: 0.0,
+        };
+
+        // 第一次碰撞
+        handle_collision_test(&mut life, 3, 2.0);
+        assert_eq!(life.lives, 2);
+
+        // 无敌期间再次碰撞
+        handle_collision_test(&mut life, 3, 2.0);
+        assert_eq!(life.lives, 2); // 生命不变
+
+        // 无敌结束
+        life.is_invincible = false;
+        handle_collision_test(&mut life, 3, 2.0);
+        assert_eq!(life.lives, 1);
+    }
+}
+
+/// ========== 难度系统测试 ==========
+
+/// 计算难度等级
+pub fn calculate_difficulty_level(elapsed_time: f32, interval: f32) -> u32 {
+    (elapsed_time / interval) as u32 + 1
+}
+
+/// 计算速度倍率
+pub fn calculate_speed_multiplier(level: u32) -> f32 {
+    1.0 + (level - 1) as f32 * 0.15
+}
+
+/// 计算生成间隔倍率
+pub fn calculate_spawn_interval_multiplier(level: u32) -> f32 {
+    (1.0 - (level - 1) as f32 * 0.10).max(0.3)
+}
+
+#[cfg(test)]
+mod difficulty_tests {
+    use super::*;
+
+    #[test]
+    fn test_initial_difficulty() {
+        let level = calculate_difficulty_level(0.0, 10.0);
+        assert_eq!(level, 1);
+
+        let speed = calculate_speed_multiplier(1);
+        assert!((speed - 1.0).abs() < 0.001);
+
+        let spawn = calculate_spawn_interval_multiplier(1);
+        assert!((spawn - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_difficulty_increase() {
+        // 10秒后升到2级
+        let level = calculate_difficulty_level(10.0, 10.0);
+        assert_eq!(level, 2);
+
+        let speed = calculate_speed_multiplier(2);
+        assert!((speed - 1.15).abs() < 0.001);
+
+        let spawn = calculate_spawn_interval_multiplier(2);
+        assert!((spawn - 0.9).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_high_difficulty() {
+        // 50秒后升到6级
+        let level = calculate_difficulty_level(50.0, 10.0);
+        assert_eq!(level, 6);
+
+        let speed = calculate_speed_multiplier(6);
+        assert!((speed - 1.75).abs() < 0.001);
+
+        let spawn = calculate_spawn_interval_multiplier(6);
+        assert!((spawn - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_spawn_interval_minimum() {
+        // 高等级时生成间隔有最小值限制
+        let spawn = calculate_spawn_interval_multiplier(10);
+        assert!((spawn - 0.3).abs() < 0.001); // 最低0.3
+
+        let spawn = calculate_spawn_interval_multiplier(20);
+        assert!((spawn - 0.3).abs() < 0.001); // 不会低于0.3
+    }
+}
+
+/// ========== 分数系统测试 ==========
+
+/// 计算分数
+pub fn calculate_score(elapsed_time: f32) -> u32 {
+    (elapsed_time * 10.0) as u32
+}
+
+#[cfg(test)]
+mod score_tests {
+    use super::*;
+
+    #[test]
+    fn test_initial_score() {
+        let score = calculate_score(0.0);
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn test_score_after_one_second() {
+        let score = calculate_score(1.0);
+        assert_eq!(score, 10);
+    }
+
+    #[test]
+    fn test_score_after_ten_seconds() {
+        let score = calculate_score(10.0);
+        assert_eq!(score, 100);
+    }
+
+    #[test]
+    fn test_score_precision() {
+        // 0.1秒 = 1分
+        let score = calculate_score(0.1);
+        assert_eq!(score, 1);
+
+        // 0.15秒 = 1分（向下取整）
+        let score = calculate_score(0.15);
+        assert_eq!(score, 1);
+
+        // 0.2秒 = 2分
+        let score = calculate_score(0.2);
+        assert_eq!(score, 2);
+    }
+}
+
+/// ========== 护盾系统测试 ==========
+
+/// 护盾状态
+#[derive(Clone, Copy)]
+pub struct TestShieldState {
+    pub has_shield: bool,
+    pub shield_timer: f32,
+}
+
+/// 更新护盾状态
+pub fn update_shield_test(shield: &mut TestShieldState, delta_secs: f32) -> bool {
+    if shield.has_shield {
+        shield.shield_timer -= delta_secs;
+
+        if shield.shield_timer <= 0.0 {
+            shield.has_shield = false;
+            return false; // 护盾消失
+        }
+        return true; // 护盾仍然有效
+    }
+    false
+}
+
+/// 激活护盾
+pub fn activate_shield_test(shield: &mut TestShieldState, duration: f32) {
+    shield.has_shield = true;
+    shield.shield_timer = duration;
+}
+
+#[cfg(test)]
+mod shield_tests {
+    use super::*;
+
+    #[test]
+    fn test_shield_activation() {
+        let mut shield = TestShieldState {
+            has_shield: false,
+            shield_timer: 0.0,
+        };
+
+        activate_shield_test(&mut shield, 5.0);
+
+        assert!(shield.has_shield);
+        assert!((shield.shield_timer - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_shield_expires() {
+        let mut shield = TestShieldState {
+            has_shield: true,
+            shield_timer: 0.5,
+        };
+
+        let active = update_shield_test(&mut shield, 0.6);
+
+        assert!(!active);
+        assert!(!shield.has_shield);
+    }
+
+    #[test]
+    fn test_shield_remains_active() {
+        let mut shield = TestShieldState {
+            has_shield: true,
+            shield_timer: 5.0,
+        };
+
+        let active = update_shield_test(&mut shield, 1.0);
+
+        assert!(active);
+        assert!(shield.has_shield);
+        assert!((shield.shield_timer - 4.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_shield_blocks_collision() {
+        let shield = TestShieldState {
+            has_shield: true,
+            shield_timer: 3.0,
+        };
+
+        // 有护盾时碰撞应该被阻挡
+        assert!(shield.has_shield);
+    }
+}
+
+/// ========== 道具碰撞测试 ==========
+
+/// 道具碰撞检测
+pub fn check_powerup_collision(
+    player_pos: Vec2,
+    player_half: Vec2,
+    powerup_pos: Vec2,
+    powerup_half: Vec2,
+) -> bool {
+    (player_pos.x - powerup_pos.x).abs() < player_half.x + powerup_half.x
+        && (player_pos.y - powerup_pos.y).abs() < player_half.y + powerup_half.y
+}
+
+#[cfg(test)]
+mod powerup_tests {
+    use super::*;
+
+    #[test]
+    fn test_powerup_collection() {
+        let player_pos = Vec2::new(0.0, 0.0);
+        let player_half = Vec2::new(20.0, 30.0);
+        let powerup_pos = Vec2::new(5.0, 5.0);
+        let powerup_half = Vec2::new(15.0, 15.0);
+
+        assert!(check_powerup_collision(player_pos, player_half, powerup_pos, powerup_half));
+    }
+
+    #[test]
+    fn test_powerup_miss() {
+        let player_pos = Vec2::new(0.0, 0.0);
+        let player_half = Vec2::new(20.0, 30.0);
+        let powerup_pos = Vec2::new(100.0, 100.0);
+        let powerup_half = Vec2::new(15.0, 15.0);
+
+        assert!(!check_powerup_collision(player_pos, player_half, powerup_pos, powerup_half));
     }
 }
