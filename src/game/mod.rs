@@ -168,7 +168,7 @@ fn setup_menu(mut commands: Commands) {
 
             // 操作说明
             parent.spawn((
-                Text::new("← → or A D to Move"),
+                Text::new("Arrow Keys or A/D to Move"),
                 TextFont {
                     font_size: 16.0,
                     ..default()
