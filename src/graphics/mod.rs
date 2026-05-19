@@ -39,7 +39,7 @@ impl Default for PixelConfig {
 }
 
 /// 玩家车辆像素数据（赛车形状）
-const PLAYER_CAR_PIXELS: &[(f32, f32, [f32; 4])] = &[
+pub const PLAYER_CAR_PIXELS: &[(f32, f32, [f32; 4])] = &[
     // 车身主体（蓝色）
     // 底部
     (-3.0, 3.0, [0.0, 0.4, 0.8, 1.0]),

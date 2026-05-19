@@ -206,9 +206,10 @@ fn collect_powerups(
 
 /// 更新激活的道具效果
 fn update_active_powerups(
+    mut commands: Commands,
     mut active_powerups: ResMut<ActivePowerUps>,
-    mut pixel_query: Query<&mut Sprite, With<crate::graphics::PixelPart>>,
-    player_graphics_query: Query<&crate::graphics::PixelGraphics, With<Player>>,
+    player_query: Query<&Transform, (With<Player>, Without<ShieldVisual>)>,
+    mut shield_query: Query<(Entity, &mut Transform, &mut Sprite), (With<ShieldVisual>, Without<Player>)>,
     time: Res<Time>,
 ) {
     if active_powerups.has_shield {
@@ -216,30 +217,80 @@ fn update_active_powerups(
 
         if active_powerups.shield_timer <= 0.0 {
             active_powerups.has_shield = false;
+            // 删除护盾框
+            for (entity, _, _) in shield_query.iter() {
+                commands.entity(entity).despawn();
+            }
         } else {
             // 护盾闪烁效果
             let pulse = (time.elapsed_secs() * 4.0).sin() * 0.3 + 0.7;
 
-            // 更新像素图形的颜色（同步护盾效果）
-            if let Ok(graphics) = player_graphics_query.single() {
-                for &pixel_entity in &graphics.pixels {
-                    if let Ok(mut sprite) = pixel_query.get_mut(pixel_entity) {
-                        // 给像素添加青色光晕效果
-                        let base = sprite.color.to_srgba();
-                        let shield_tint = Color::srgb(0.2, 0.8, 1.0).to_srgba();
-                        // 混合颜色
-                        sprite.color = Color::srgba(
-                            base.red * 0.7 + shield_tint.red * 0.3 * pulse,
-                            base.green * 0.7 + shield_tint.green * 0.3 * pulse,
-                            base.blue * 0.7 + shield_tint.blue * 0.3 * pulse,
-                            base.alpha,
-                        );
+            // 如果护盾框不存在，创建它
+            if shield_query.is_empty() {
+                if let Ok(player_transform) = player_query.single() {
+                    // 创建护盾框（四个边）
+                    let shield_size = Vec2::new(50.0, 70.0);
+                    let thickness = 3.0;
+                    let px = player_transform.translation.x;
+                    let py = player_transform.translation.y;
+
+                    // 上边
+                    commands.spawn((
+                        Sprite::from_color(Color::srgba(0.0, 0.8, 1.0, 0.8), Vec2::new(shield_size.x, thickness)),
+                        Transform::from_xyz(px, py + shield_size.y / 2.0, 1.5),
+                        ShieldVisual,
+                    ));
+
+                    // 下边
+                    commands.spawn((
+                        Sprite::from_color(Color::srgba(0.0, 0.8, 1.0, 0.8), Vec2::new(shield_size.x, thickness)),
+                        Transform::from_xyz(px, py - shield_size.y / 2.0, 1.5),
+                        ShieldVisual,
+                    ));
+
+                    // 左边
+                    commands.spawn((
+                        Sprite::from_color(Color::srgba(0.0, 0.8, 1.0, 0.8), Vec2::new(thickness, shield_size.y)),
+                        Transform::from_xyz(px - shield_size.x / 2.0, py, 1.5),
+                        ShieldVisual,
+                    ));
+
+                    // 右边
+                    commands.spawn((
+                        Sprite::from_color(Color::srgba(0.0, 0.8, 1.0, 0.8), Vec2::new(thickness, shield_size.y)),
+                        Transform::from_xyz(px + shield_size.x / 2.0, py, 1.5),
+                        ShieldVisual,
+                    ));
+                }
+            } else {
+                // 更新护盾框位置和闪烁
+                if let Ok(player_transform) = player_query.single() {
+                    let px = player_transform.translation.x;
+                    let py = player_transform.translation.y;
+                    let shield_size = Vec2::new(50.0, 70.0);
+                    let positions = [
+                        (px, py + shield_size.y / 2.0),   // 上
+                        (px, py - shield_size.y / 2.0),   // 下
+                        (px - shield_size.x / 2.0, py),   // 左
+                        (px + shield_size.x / 2.0, py),   // 右
+                    ];
+
+                    for (i, (_, mut transform, mut sprite)) in shield_query.iter_mut().enumerate() {
+                        if i < positions.len() {
+                            transform.translation.x = positions[i].0;
+                            transform.translation.y = positions[i].1;
+                            sprite.color = Color::srgba(0.0, 0.8, 1.0, 0.5 + pulse * 0.5);
+                        }
                     }
                 }
             }
         }
     }
 }
+
+/// 护盾视觉效果标记
+#[derive(Component)]
+struct ShieldVisual;
 
 /// 道具图标标记
 #[derive(Component)]
