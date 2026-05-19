@@ -84,6 +84,7 @@ fn spawn_life_ui(mut commands: Commands) {
             ..default()
         },
         LifeUI,
+        crate::game::GameEntity,
     ));
 }
 

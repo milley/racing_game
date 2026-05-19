@@ -208,6 +208,7 @@ fn setup_game(
                 ..default()
             },
             GameUI,
+            GameEntity,
         ))
         .with_children(|parent| {
             // 分数显示
