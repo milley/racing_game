@@ -3,11 +3,16 @@
 //! 包含：
 //! - 护盾道具：免疫一次碰撞
 //! - 清除道具：清除所有障碍物
+//! - 磁铁道具：吸引附近道具
+//! - 减速道具：降低障碍物速度
+//! - 双倍分数：分数倍率翻倍
+//! - 缩小道具：减小玩家碰撞箱
+//! - 氮气加速：临时速度提升
 
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::game::{GameState, GameEntity, Difficulty};
+use crate::game::{GameState, GameEntity, Difficulty, Combo};
 use crate::player::Player;
 
 /// 道具插件
@@ -39,6 +44,24 @@ struct PowerUpConfig {
     spawn_interval: f32,
     /// 护盾持续时间
     shield_duration: f32,
+    /// 磁铁持续时间
+    magnet_duration: f32,
+    /// 磁铁吸引范围
+    magnet_range: f32,
+    /// 减速持续时间
+    slowdown_duration: f32,
+    /// 减速因子
+    slowdown_factor: f32,
+    /// 双倍分数持续时间
+    double_score_duration: f32,
+    /// 缩小持续时间
+    shrink_duration: f32,
+    /// 缩小因子
+    shrink_factor: f32,
+    /// 氮气持续时间
+    nitro_duration: f32,
+    /// 氮气速度加成
+    nitro_speed_boost: f32,
 }
 
 impl Default for PowerUpConfig {
@@ -48,6 +71,15 @@ impl Default for PowerUpConfig {
             speed: 150.0,
             spawn_interval: 8.0,
             shield_duration: 5.0,
+            magnet_duration: 8.0,
+            magnet_range: 150.0,
+            slowdown_duration: 6.0,
+            slowdown_factor: 0.5,
+            double_score_duration: 10.0,
+            shrink_duration: 5.0,
+            shrink_factor: 0.5,
+            nitro_duration: 3.0,
+            nitro_speed_boost: 0.5,
         }
     }
 }
@@ -63,6 +95,26 @@ pub struct ActivePowerUps {
     pub shield_timer: f32,
     /// 是否有护盾
     pub has_shield: bool,
+    /// 磁铁剩余时间
+    pub magnet_timer: f32,
+    /// 是否有磁铁
+    pub has_magnet: bool,
+    /// 减速剩余时间
+    pub slowdown_timer: f32,
+    /// 是否有减速
+    pub has_slowdown: bool,
+    /// 双倍分数剩余时间
+    pub double_score_timer: f32,
+    /// 是否有双倍分数
+    pub has_double_score: bool,
+    /// 缩小剩余时间
+    pub shrink_timer: f32,
+    /// 是否有缩小
+    pub has_shrink: bool,
+    /// 氮气剩余时间
+    pub nitro_timer: f32,
+    /// 是否有氮气
+    pub has_nitro: bool,
 }
 
 /// 道具类型
@@ -72,6 +124,16 @@ enum PowerUpType {
     Shield,
     /// 清除障碍物
     Clear,
+    /// 磁铁
+    Magnet,
+    /// 减速
+    Slowdown,
+    /// 双倍分数
+    DoubleScore,
+    /// 缩小
+    Shrink,
+    /// 氮气加速
+    NitroBoost,
 }
 
 /// 道具实体标记
@@ -107,17 +169,26 @@ fn spawn_powerups(
         let x = (rng.gen::<f32>() - 0.5) * 200.0;
         let y = 400.0;
 
-        // 随机类型
-        let powerup_type = if rng.gen::<bool>() {
-            PowerUpType::Shield
-        } else {
-            PowerUpType::Clear
+        // 随机类型 (加权随机)
+        let powerup_type = match rng.gen_range(0..100) {
+            0..=20 => PowerUpType::Shield,      // 21%
+            21..=35 => PowerUpType::Clear,       // 15%
+            36..=50 => PowerUpType::Magnet,      // 15%
+            51..=65 => PowerUpType::Slowdown,    // 15%
+            66..=80 => PowerUpType::DoubleScore, // 15%
+            81..=90 => PowerUpType::Shrink,      // 10%
+            _ => PowerUpType::NitroBoost,        // 10%
         };
 
-        // 根据类型设置颜色和图标
-        let (color, icon) = match powerup_type {
-            PowerUpType::Shield => (Color::srgb(0.0, 0.8, 1.0), "🛡"),
-            PowerUpType::Clear => (Color::srgb(1.0, 0.5, 0.0), "💥"),
+        // 根据类型设置颜色
+        let color = match powerup_type {
+            PowerUpType::Shield => Color::srgb(0.0, 0.8, 1.0),      // 青色
+            PowerUpType::Clear => Color::srgb(1.0, 0.5, 0.0),       // 橙色
+            PowerUpType::Magnet => Color::srgb(0.8, 0.2, 0.8),      // 紫色
+            PowerUpType::Slowdown => Color::srgb(0.2, 0.5, 1.0),    // 蓝色
+            PowerUpType::DoubleScore => Color::srgb(1.0, 0.85, 0.0), // 金色
+            PowerUpType::Shrink => Color::srgb(0.2, 0.9, 0.3),      // 绿色
+            PowerUpType::NitroBoost => Color::srgb(1.0, 0.4, 0.0),  // 橙红色
         };
 
         commands.spawn((
@@ -127,32 +198,36 @@ fn spawn_powerups(
             powerup_type,
             GameEntity,
         ));
-
-        // 显示图标（可选）
-        commands.spawn((
-            Text::new(icon),
-            TextFont {
-                font_size: 20.0,
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 1.0, 1.0)),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            PowerUpIcon,
-        ));
     }
 }
 
 /// 移动道具
 fn move_powerups(
     mut commands: Commands,
-    mut query: Query<(Entity, &mut Transform), With<PowerUp>>,
+    mut query: Query<(Entity, &mut Transform), (With<PowerUp>, Without<Player>)>,
     config: Res<PowerUpConfig>,
     time: Res<Time>,
+    active_powerups: Res<ActivePowerUps>,
+    player_query: Query<&Transform, (With<Player>, Without<PowerUp>)>,
 ) {
+    let player_pos = player_query.single().map(|t| t.translation.truncate()).ok();
+
     for (entity, mut transform) in query.iter_mut() {
+        // 磁铁效果：吸引附近道具
+        if active_powerups.has_magnet {
+            if let Some(pp) = player_pos {
+                let powerup_pos = transform.translation.truncate();
+                let dist = pp.distance(powerup_pos);
+                if dist < config.magnet_range {
+                    let direction = (pp - powerup_pos).normalize();
+                    let attract_speed = 300.0 * (1.0 - dist / config.magnet_range);
+                    transform.translation.x += direction.x * attract_speed * time.delta_secs();
+                    transform.translation.y += direction.y * attract_speed * time.delta_secs();
+                }
+            }
+        }
+
+        // 正常下落
         transform.translation.y -= config.speed * time.delta_secs();
 
         if transform.translation.y < -400.0 {
@@ -165,6 +240,7 @@ fn move_powerups(
 fn collect_powerups(
     mut commands: Commands,
     mut active_powerups: ResMut<ActivePowerUps>,
+    mut combo: ResMut<Combo>,
     player_query: Query<&Transform, With<Player>>,
     powerup_query: Query<(Entity, &Transform, &PowerUpType), With<PowerUp>>,
     config: Res<PowerUpConfig>,
@@ -202,6 +278,28 @@ fn collect_powerups(
                         commands.entity(obstacle_entity).despawn();
                     }
                 }
+                PowerUpType::Magnet => {
+                    active_powerups.has_magnet = true;
+                    active_powerups.magnet_timer = config.magnet_duration;
+                }
+                PowerUpType::Slowdown => {
+                    active_powerups.has_slowdown = true;
+                    active_powerups.slowdown_timer = config.slowdown_duration;
+                }
+                PowerUpType::DoubleScore => {
+                    active_powerups.has_double_score = true;
+                    active_powerups.double_score_timer = config.double_score_duration;
+                    // 立即应用双倍分数到连击倍率
+                    combo.multiplier *= 2.0;
+                }
+                PowerUpType::Shrink => {
+                    active_powerups.has_shrink = true;
+                    active_powerups.shrink_timer = config.shrink_duration;
+                }
+                PowerUpType::NitroBoost => {
+                    active_powerups.has_nitro = true;
+                    active_powerups.nitro_timer = config.nitro_duration;
+                }
             }
 
             commands.entity(entity).despawn();
@@ -213,10 +311,12 @@ fn collect_powerups(
 fn update_active_powerups(
     mut commands: Commands,
     mut active_powerups: ResMut<ActivePowerUps>,
+    mut combo: ResMut<Combo>,
     player_query: Query<&Transform, (With<Player>, Without<ShieldVisual>)>,
     mut shield_query: Query<(Entity, &mut Transform, &mut Sprite), (With<ShieldVisual>, Without<Player>)>,
     time: Res<Time>,
 ) {
+    // 更新护盾
     if active_powerups.has_shield {
         active_powerups.shield_timer -= time.delta_secs();
 
@@ -291,12 +391,50 @@ fn update_active_powerups(
             }
         }
     }
+
+    // 更新磁铁
+    if active_powerups.has_magnet {
+        active_powerups.magnet_timer -= time.delta_secs();
+        if active_powerups.magnet_timer <= 0.0 {
+            active_powerups.has_magnet = false;
+        }
+    }
+
+    // 更新减速
+    if active_powerups.has_slowdown {
+        active_powerups.slowdown_timer -= time.delta_secs();
+        if active_powerups.slowdown_timer <= 0.0 {
+            active_powerups.has_slowdown = false;
+        }
+    }
+
+    // 更新双倍分数
+    if active_powerups.has_double_score {
+        active_powerups.double_score_timer -= time.delta_secs();
+        if active_powerups.double_score_timer <= 0.0 {
+            active_powerups.has_double_score = false;
+            // 移除双倍分数效果
+            combo.multiplier /= 2.0;
+        }
+    }
+
+    // 更新缩小
+    if active_powerups.has_shrink {
+        active_powerups.shrink_timer -= time.delta_secs();
+        if active_powerups.shrink_timer <= 0.0 {
+            active_powerups.has_shrink = false;
+        }
+    }
+
+    // 更新氮气
+    if active_powerups.has_nitro {
+        active_powerups.nitro_timer -= time.delta_secs();
+        if active_powerups.nitro_timer <= 0.0 {
+            active_powerups.has_nitro = false;
+        }
+    }
 }
 
 /// 护盾视觉效果标记
 #[derive(Component)]
 struct ShieldVisual;
-
-/// 道具图标标记
-#[derive(Component)]
-struct PowerUpIcon;

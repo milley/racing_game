@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::{GameConfig, game::{GameEntity, GameState}};
+use crate::powerup::ActivePowerUps;
 
 /// 玩家插件
 pub struct PlayerPlugin;
@@ -74,12 +75,20 @@ fn player_movement(
     game_config: Res<GameConfig>,
     mut query: Query<(&mut Transform, &mut PlayerPosition), With<Player>>,
     time: Res<Time>,
+    active_powerups: Res<ActivePowerUps>,
 ) {
     let Ok((mut transform, mut position)) = query.single_mut() else {
         return;
     };
 
-    let delta = config.speed * time.delta_secs();
+    let mut speed = config.speed;
+
+    // 应用氮气加速
+    if active_powerups.has_nitro {
+        speed *= 1.5; // 速度提升50%
+    }
+
+    let delta = speed * time.delta_secs();
 
     // 计算道路边界
     let half_road = game_config.road_width / 2.0 - config.width / 2.0;

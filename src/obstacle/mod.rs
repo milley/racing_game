@@ -3,7 +3,7 @@ use rand::Rng;
 
 use crate::{
     GameConfig,
-    game::{GameEntity, GameState, Difficulty},
+    game::{GameEntity, GameState, Difficulty, Combo},
     player::{Player, PlayerConfig},
     life::{PlayerLife, LifeConfig, handle_collision},
     powerup::ActivePowerUps,
@@ -14,6 +14,10 @@ use crate::{
 /// 障碍物实体标记（公开供其他模块使用）
 #[derive(Component)]
 pub struct Obstacle;
+
+/// 已被闪避标记
+#[derive(Component)]
+struct Dodged;
 
 /// 障碍物碰撞箱组件
 #[derive(Component)]
@@ -136,16 +140,38 @@ fn spawn_obstacles(
 /// 移动障碍物
 fn move_obstacles(
     mut commands: Commands,
-    mut query: Query<(Entity, &mut Transform), With<Obstacle>>,
+    mut query: Query<(Entity, &mut Transform, Option<&Dodged>), (With<Obstacle>, Without<Player>)>,
     config: Res<ObstacleConfig>,
     difficulty: Res<Difficulty>,
     time: Res<Time>,
+    player_query: Query<&Transform, (With<Player>, Without<Obstacle>)>,
+    mut combo: ResMut<Combo>,
+    active_powerups: Res<ActivePowerUps>,
 ) {
     // 根据难度调整速度
-    let adjusted_speed = config.speed * difficulty.speed_multiplier;
+    let mut adjusted_speed = config.speed * difficulty.speed_multiplier;
 
-    for (entity, mut transform) in query.iter_mut() {
+    // 应用减速效果
+    if active_powerups.has_slowdown {
+        adjusted_speed *= 0.5; // 减速50%
+    }
+
+    // 获取玩家位置
+    let player_y = player_query.single().map(|t| t.translation.y).unwrap_or(-220.0);
+
+    for (entity, mut transform, dodged) in query.iter_mut() {
         transform.translation.y -= adjusted_speed * time.delta_secs();
+
+        // 检测闪避：障碍物通过玩家下方且未被标记
+        if transform.translation.y < player_y - 30.0 && dodged.is_none() {
+            // 标记为已闪避
+            commands.entity(entity).insert(Dodged);
+
+            // 增加连击
+            combo.count += 1;
+            combo.multiplier = 1.0 + (combo.count as f32 * 0.1).min(2.0); // 最大3.0倍
+            combo.timer = combo.max_timer;
+        }
 
         // 移出屏幕后删除
         if transform.translation.y < -400.0 {
@@ -167,13 +193,19 @@ fn check_collisions(
     player_config: Res<PlayerConfig>,
     mut achievement_tracker: ResMut<crate::achievement::AchievementTracker>,
     mut save_data: ResMut<crate::save::SaveData>,
+    mut combo: ResMut<Combo>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
     };
 
     let player_pos = player_transform.translation.truncate();
-    let player_half = Vec2::new(player_config.width / 2.0, player_config.height / 2.0);
+    let mut player_half = Vec2::new(player_config.width / 2.0, player_config.height / 2.0);
+
+    // 应用缩小效果
+    if active_powerups.has_shrink {
+        player_half *= 0.5;
+    }
 
     for (obstacle_entity, obstacle_transform, hitbox) in obstacle_query.iter() {
         let obstacle_pos = obstacle_transform.translation.truncate();
@@ -196,6 +228,11 @@ fn check_collisions(
 
             // 销毁障碍物
             commands.entity(obstacle_entity).despawn();
+
+            // 重置连击
+            combo.count = 0;
+            combo.multiplier = 1.0;
+            combo.timer = 0.0;
 
             // 处理生命
             if handle_collision(&mut player_life, &life_config) {

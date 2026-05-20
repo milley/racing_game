@@ -13,6 +13,7 @@ mod graphics;
 mod save;
 mod settings;
 mod achievement;
+mod game_mode;
 #[cfg(test)]
 mod tests;
 

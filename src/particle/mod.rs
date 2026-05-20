@@ -3,11 +3,14 @@
 //! 包含：
 //! - 碰撞爆炸粒子
 //! - 速度线效果
+//! - 氮气尾焰效果
 
 use bevy::prelude::*;
 use rand::Rng;
 
 use crate::game::{GameState, GameEntity, Difficulty};
+use crate::player::Player;
+use crate::powerup::ActivePowerUps;
 
 /// 粒子插件
 pub struct ParticlePlugin;
@@ -21,6 +24,7 @@ impl Plugin for ParticlePlugin {
             .add_systems(Update, (
                 update_particles,
                 update_speed_lines,
+                update_nitro_trail,
             ).run_if(in_state(GameState::Playing)));
     }
 }
@@ -176,5 +180,68 @@ fn update_speed_lines(
         // 根据速度调整透明度
         let alpha = 0.2 + (difficulty.speed_multiplier - 1.0) * 0.3;
         sprite.color.set_alpha(alpha.min(0.6));
+    }
+}
+
+/// 氮气尾焰粒子标记
+#[derive(Component)]
+struct NitroFlame {
+    lifetime: f32,
+}
+
+/// 更新氮气尾焰效果
+fn update_nitro_trail(
+    mut commands: Commands,
+    player_query: Query<&Transform, (With<Player>, Without<NitroFlame>)>,
+    active_powerups: Res<ActivePowerUps>,
+    mut flame_query: Query<(Entity, &mut Transform, &mut Sprite, &mut NitroFlame), (With<NitroFlame>, Without<Player>)>,
+    time: Res<Time>,
+) {
+    // 更新现有的尾焰粒子
+    for (entity, mut transform, mut sprite, mut flame) in flame_query.iter_mut() {
+        flame.lifetime -= time.delta_secs();
+
+        if flame.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        // 向上移动并扩散
+        transform.translation.y += 100.0 * time.delta_secs();
+        let scale = 1.0 + (0.3 - flame.lifetime) * 2.0;
+        transform.scale = Vec3::splat(scale.max(0.1));
+
+        // 淡出
+        let alpha = (flame.lifetime / 0.3).min(1.0);
+        sprite.color.set_alpha(alpha);
+    }
+
+    // 如果氮气激活，生成新的尾焰粒子
+    if active_powerups.has_nitro {
+        if let Ok(player_transform) = player_query.single() {
+            let mut rng = rand::thread_rng();
+
+            // 在玩家后方生成火焰粒子
+            for _ in 0..2 {
+                let x = player_transform.translation.x + (rng.gen::<f32>() - 0.5) * 20.0;
+                let y = player_transform.translation.y - 35.0;
+                let size = 5.0 + rng.gen::<f32>() * 8.0;
+
+                // 随机火焰颜色
+                let colors = [
+                    Color::srgb(1.0, 0.4, 0.0),   // 橙色
+                    Color::srgb(1.0, 0.6, 0.0),   // 黄橙色
+                    Color::srgb(1.0, 0.2, 0.0),   // 红橙色
+                    Color::srgb(1.0, 0.8, 0.2),   // 黄色
+                ];
+                let color = colors[rng.gen_range(0..colors.len())];
+
+                commands.spawn((
+                    Sprite::from_color(color, Vec2::splat(size)),
+                    Transform::from_xyz(x, y, 0.8),
+                    NitroFlame { lifetime: 0.3 },
+                ));
+            }
+        }
     }
 }

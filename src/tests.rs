@@ -905,3 +905,267 @@ mod settings_navigation_tests {
         }
     }
 }
+
+/// ========== 连击系统测试 ==========
+
+/// 连击状态
+#[derive(Clone, Copy)]
+pub struct TestComboState {
+    pub count: u32,
+    pub multiplier: f32,
+    pub timer: f32,
+    pub max_timer: f32,
+}
+
+impl Default for TestComboState {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            multiplier: 1.0,
+            timer: 0.0,
+            max_timer: 2.0,
+        }
+    }
+}
+
+/// 记录闪避（增加连击）
+pub fn record_dodge(combo: &mut TestComboState) {
+    combo.count += 1;
+    combo.multiplier = 1.0 + (combo.count as f32 * 0.1).min(2.0);
+    combo.timer = combo.max_timer;
+}
+
+/// 更新连击计时器
+/// 返回 true 表示连击仍然有效
+pub fn update_combo_timer(combo: &mut TestComboState, delta_secs: f32) -> bool {
+    if combo.count > 0 {
+        combo.timer -= delta_secs;
+        if combo.timer <= 0.0 {
+            combo.count = 0;
+            combo.multiplier = 1.0;
+            combo.timer = 0.0;
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
+/// 碰撞重置连击
+pub fn reset_combo_on_collision(combo: &mut TestComboState) {
+    combo.count = 0;
+    combo.multiplier = 1.0;
+    combo.timer = 0.0;
+}
+
+#[cfg(test)]
+mod combo_tests {
+    use super::*;
+
+    #[test]
+    fn test_combo_initial_state() {
+        let combo = TestComboState::default();
+        assert_eq!(combo.count, 0);
+        assert!((combo.multiplier - 1.0).abs() < 0.001);
+        assert!((combo.timer).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combo_first_dodge() {
+        let mut combo = TestComboState::default();
+        record_dodge(&mut combo);
+
+        assert_eq!(combo.count, 1);
+        assert!((combo.multiplier - 1.1).abs() < 0.001); // 1 + 1*0.1
+        assert!((combo.timer - 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combo_multiple_dodges() {
+        let mut combo = TestComboState::default();
+
+        for i in 1..=5 {
+            record_dodge(&mut combo);
+            assert_eq!(combo.count, i);
+        }
+
+        // 5次闪避后倍率应该是 1 + 5*0.1 = 1.5
+        assert!((combo.multiplier - 1.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combo_max_multiplier() {
+        let mut combo = TestComboState::default();
+
+        // 进行大量闪避，测试倍率上限
+        for _ in 0..30 {
+            record_dodge(&mut combo);
+        }
+
+        // 倍率上限是 3.0 (1.0 + 2.0)
+        assert!((combo.multiplier - 3.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combo_timer_expiry() {
+        let mut combo = TestComboState::default();
+        record_dodge(&mut combo);
+
+        // 经过2.1秒，连击应该过期
+        let active = update_combo_timer(&mut combo, 2.1);
+
+        assert!(!active);
+        assert_eq!(combo.count, 0);
+        assert!((combo.multiplier - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combo_timer_still_active() {
+        let mut combo = TestComboState::default();
+        record_dodge(&mut combo);
+
+        // 经过1秒，连击仍然有效
+        let active = update_combo_timer(&mut combo, 1.0);
+
+        assert!(active);
+        assert_eq!(combo.count, 1);
+        assert!((combo.timer - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combo_reset_on_collision() {
+        let mut combo = TestComboState::default();
+
+        // 建立连击
+        for _ in 0..5 {
+            record_dodge(&mut combo);
+        }
+        assert_eq!(combo.count, 5);
+
+        // 碰撞重置
+        reset_combo_on_collision(&mut combo);
+
+        assert_eq!(combo.count, 0);
+        assert!((combo.multiplier - 1.0).abs() < 0.001);
+        assert!((combo.timer).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_combo_refresh_timer_on_dodge() {
+        let mut combo = TestComboState::default();
+        record_dodge(&mut combo);
+
+        // 经过1秒
+        update_combo_timer(&mut combo, 1.0);
+        assert!((combo.timer - 1.0).abs() < 0.001);
+
+        // 再次闪避，计时器应该刷新
+        record_dodge(&mut combo);
+        assert!((combo.timer - 2.0).abs() < 0.001);
+        assert_eq!(combo.count, 2);
+    }
+}
+
+/// ========== 游戏模式测试 ==========
+
+/// 游戏模式枚举
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TestGameMode {
+    Classic,
+    Endless,
+    TimeAttack,
+}
+
+impl Default for TestGameMode {
+    fn default() -> Self {
+        TestGameMode::Classic
+    }
+}
+
+/// 切换游戏模式
+fn cycle_game_mode(mode: TestGameMode, direction: i32) -> TestGameMode {
+    match mode {
+        TestGameMode::Classic => if direction > 0 { TestGameMode::Endless } else { TestGameMode::TimeAttack },
+        TestGameMode::Endless => if direction > 0 { TestGameMode::TimeAttack } else { TestGameMode::Classic },
+        TestGameMode::TimeAttack => if direction > 0 { TestGameMode::Classic } else { TestGameMode::Endless },
+    }
+}
+
+/// 获取模式生命值
+fn get_mode_lives(mode: TestGameMode) -> u32 {
+    match mode {
+        TestGameMode::Classic => 3,
+        TestGameMode::Endless => 1,
+        TestGameMode::TimeAttack => 3,
+    }
+}
+
+/// 获取模式时间限制
+fn get_mode_time_limit(mode: TestGameMode) -> Option<f32> {
+    match mode {
+        TestGameMode::TimeAttack => Some(60.0),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod game_mode_tests {
+    use super::*;
+
+    #[test]
+    fn test_default_mode() {
+        let mode = TestGameMode::default();
+        assert_eq!(mode, TestGameMode::Classic);
+    }
+
+    #[test]
+    fn test_cycle_mode_forward() {
+        let mode = TestGameMode::Classic;
+        assert_eq!(cycle_game_mode(mode, 1), TestGameMode::Endless);
+        assert_eq!(cycle_game_mode(TestGameMode::Endless, 1), TestGameMode::TimeAttack);
+        assert_eq!(cycle_game_mode(TestGameMode::TimeAttack, 1), TestGameMode::Classic);
+    }
+
+    #[test]
+    fn test_cycle_mode_backward() {
+        let mode = TestGameMode::Classic;
+        assert_eq!(cycle_game_mode(mode, -1), TestGameMode::TimeAttack);
+        assert_eq!(cycle_game_mode(TestGameMode::Endless, -1), TestGameMode::Classic);
+        assert_eq!(cycle_game_mode(TestGameMode::TimeAttack, -1), TestGameMode::Endless);
+    }
+
+    #[test]
+    fn test_mode_lives() {
+        assert_eq!(get_mode_lives(TestGameMode::Classic), 3);
+        assert_eq!(get_mode_lives(TestGameMode::Endless), 1);
+        assert_eq!(get_mode_lives(TestGameMode::TimeAttack), 3);
+    }
+
+    #[test]
+    fn test_mode_time_limit() {
+        assert_eq!(get_mode_time_limit(TestGameMode::Classic), None);
+        assert_eq!(get_mode_time_limit(TestGameMode::Endless), None);
+        assert_eq!(get_mode_time_limit(TestGameMode::TimeAttack), Some(60.0));
+    }
+
+    #[test]
+    fn test_cycle_all_modes() {
+        let mut mode = TestGameMode::default();
+
+        // 向前遍历: Classic -> Endless -> TimeAttack -> Classic
+        mode = cycle_game_mode(mode, 1);
+        assert_eq!(mode, TestGameMode::Endless);
+        mode = cycle_game_mode(mode, 1);
+        assert_eq!(mode, TestGameMode::TimeAttack);
+        mode = cycle_game_mode(mode, 1);
+        assert_eq!(mode, TestGameMode::Classic);
+
+        // 向后遍历: Classic -> TimeAttack -> Endless -> Classic
+        mode = cycle_game_mode(mode, -1);
+        assert_eq!(mode, TestGameMode::TimeAttack);
+        mode = cycle_game_mode(mode, -1);
+        assert_eq!(mode, TestGameMode::Endless);
+        mode = cycle_game_mode(mode, -1);
+        assert_eq!(mode, TestGameMode::Classic);
+    }
+}

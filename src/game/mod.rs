@@ -12,6 +12,7 @@ use crate::{
     save::SavePlugin,
     settings::SettingsPlugin,
     achievement::AchievementPlugin,
+    game_mode::GameModePlugin,
 };
 
 /// 游戏状态
@@ -77,11 +78,13 @@ impl Plugin for GamePlugin {
             .init_resource::<Score>()
             .init_resource::<Difficulty>()
             .init_resource::<GameTimer>()
+            .init_resource::<Combo>()
             // 添加子插件
             .add_plugins((
                 SavePlugin,
                 SettingsPlugin,
                 AchievementPlugin,
+                GameModePlugin,
                 PlayerPlugin,
                 RoadPlugin,
                 ObstaclePlugin,
@@ -108,8 +111,33 @@ impl Plugin for GamePlugin {
                 resume_system.run_if(in_state(GameState::Paused)),
                 update_score.run_if(in_state(GameState::Playing)),
                 update_difficulty.run_if(in_state(GameState::Playing)),
+                update_combo.run_if(in_state(GameState::Playing)),
                 game_over_system.run_if(in_state(GameState::GameOver)),
             ));
+    }
+}
+
+/// 连击系统
+#[derive(Resource)]
+pub struct Combo {
+    /// 连击计数
+    pub count: u32,
+    /// 分数倍率
+    pub multiplier: f32,
+    /// 连击计时器
+    pub timer: f32,
+    /// 连击最大时间
+    pub max_timer: f32,
+}
+
+impl Default for Combo {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            multiplier: 1.0,
+            timer: 0.0,
+            max_timer: 2.0,
+        }
     }
 }
 
@@ -137,7 +165,7 @@ fn setup_camera(mut commands: Commands) {
 }
 
 /// 菜单选项数量
-const MENU_OPTION_COUNT: usize = 3;
+const MENU_OPTION_COUNT: usize = 4;
 
 /// 当前选中的菜单选项
 #[derive(Resource, Default)]
@@ -147,13 +175,19 @@ struct MenuSelection(usize);
 #[derive(Component)]
 enum MenuOption {
     Start,
+    GameMode,
     Settings,
     Achievements,
 }
 
 /// 菜单设置
-fn setup_menu(mut commands: Commands) {
+fn setup_menu(
+    mut commands: Commands,
+    current_mode: Res<crate::game_mode::CurrentGameMode>,
+) {
     commands.insert_resource(MenuSelection(0));
+
+    let mode_name = crate::game_mode::get_mode_name(current_mode.mode);
 
     // 根容器 - 全屏居中
     commands
@@ -200,6 +234,21 @@ fn setup_menu(mut commands: Commands) {
                 MenuOption::Start,
             ));
 
+            // 游戏模式
+            parent.spawn((
+                Text::new(format!("  Mode: {}  ", mode_name)),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                Node {
+                    margin: UiRect::bottom(Val::Px(10.0)),
+                    ..default()
+                },
+                MenuOption::GameMode,
+            ));
+
             // 设置
             parent.spawn((
                 Text::new("  Settings  "),
@@ -232,7 +281,7 @@ fn setup_menu(mut commands: Commands) {
 
             // 操作说明
             parent.spawn((
-                Text::new("Up/Down: Select  |  Enter: Confirm"),
+                Text::new("Up/Down: Select  |  Enter: Confirm  |  Left/Right: Change Mode"),
                 TextFont {
                     font_size: 14.0,
                     ..default()
@@ -249,9 +298,12 @@ fn setup_game(
     mut score: ResMut<Score>,
     mut difficulty: ResMut<Difficulty>,
     mut game_timer: ResMut<GameTimer>,
+    mut combo: ResMut<Combo>,
     settings: Res<crate::settings::GameSettings>,
     mut player_life: ResMut<crate::life::PlayerLife>,
     mut life_config: ResMut<crate::life::LifeConfig>,
+    current_mode: Res<crate::game_mode::CurrentGameMode>,
+    time_attack_timer: Res<crate::game_mode::TimeAttackTimer>,
 ) {
     // 重置游戏状态
     score.value = 0;
@@ -262,9 +314,27 @@ fn setup_game(
     game_timer.elapsed = 0.0;
     game_timer.last_difficulty_increase = 0.0;
 
-    // 应用难度到生命值
-    life_config.max_lives = settings.difficulty.lives();
-    player_life.lives = life_config.max_lives;
+    // 重置连击
+    combo.count = 0;
+    combo.multiplier = 1.0;
+    combo.timer = 0.0;
+
+    // 根据游戏模式设置生命值
+    use crate::game_mode::GameMode;
+    match current_mode.mode {
+        GameMode::Classic => {
+            life_config.max_lives = settings.difficulty.lives();
+            player_life.lives = life_config.max_lives;
+        }
+        GameMode::Endless => {
+            life_config.max_lives = 1;
+            player_life.lives = 1;
+        }
+        GameMode::TimeAttack => {
+            life_config.max_lives = settings.difficulty.lives();
+            player_life.lives = life_config.max_lives;
+        }
+    }
 
     // UI 根容器
     commands
@@ -294,6 +364,38 @@ fn setup_game(
                 },
                 ScoreText,
             ));
+
+            // 连击显示
+            parent.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.8, 0.0)),
+                Node {
+                    margin: UiRect::px(10.0, 10.0, 0.0, 0.0),
+                    ..default()
+                },
+                ComboText,
+            ));
+
+            // 限时模式计时器显示
+            if current_mode.mode == GameMode::TimeAttack {
+                parent.spawn((
+                    Text::new(format!("Time: {:.1}s", time_attack_timer.remaining)),
+                    TextFont {
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.5, 0.0)),
+                    Node {
+                        margin: UiRect::px(10.0, 10.0, 0.0, 0.0),
+                        ..default()
+                    },
+                    TimerText,
+                ));
+            }
         });
 }
 
@@ -428,6 +530,7 @@ fn menu_system(
     mut next_state: ResMut<NextState<GameState>>,
     mut selection: ResMut<MenuSelection>,
     mut query: Query<(&mut Text, &mut TextColor, &MenuOption)>,
+    mut current_mode: ResMut<crate::game_mode::CurrentGameMode>,
 ) {
     // 上下选择
     if keyboard.just_pressed(KeyCode::ArrowUp) {
@@ -437,12 +540,23 @@ fn menu_system(
         selection.0 = (selection.0 + 1) % MENU_OPTION_COUNT;
     }
 
+    // 左右切换游戏模式
+    if keyboard.just_pressed(KeyCode::ArrowLeft) || keyboard.just_pressed(KeyCode::ArrowRight) {
+        use crate::game_mode::GameMode;
+        current_mode.mode = match current_mode.mode {
+            GameMode::Classic => if keyboard.just_pressed(KeyCode::ArrowRight) { GameMode::Endless } else { GameMode::TimeAttack },
+            GameMode::Endless => if keyboard.just_pressed(KeyCode::ArrowRight) { GameMode::TimeAttack } else { GameMode::Classic },
+            GameMode::TimeAttack => if keyboard.just_pressed(KeyCode::ArrowRight) { GameMode::Classic } else { GameMode::Endless },
+        };
+    }
+
     // 确认选择
     if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
         match selection.0 {
             0 => next_state.set(GameState::Playing),
-            1 => next_state.set(GameState::Settings),
-            2 => next_state.set(GameState::Achievements),
+            1 => {}, // GameMode - handled by left/right
+            2 => next_state.set(GameState::Settings),
+            3 => next_state.set(GameState::Achievements),
             _ => {}
         }
     }
@@ -451,17 +565,19 @@ fn menu_system(
     for (mut text, mut color, option) in query.iter_mut() {
         let idx = match option {
             MenuOption::Start => 0,
-            MenuOption::Settings => 1,
-            MenuOption::Achievements => 2,
+            MenuOption::GameMode => 1,
+            MenuOption::Settings => 2,
+            MenuOption::Achievements => 3,
         };
 
         let is_selected = idx == selection.0;
 
         // 更新文本（添加或移除选择指示符）
         let base_text = match option {
-            MenuOption::Start => "Start Game",
-            MenuOption::Settings => "Settings",
-            MenuOption::Achievements => "Achievements",
+            MenuOption::Start => "Start Game".to_string(),
+            MenuOption::GameMode => format!("Mode: {}", crate::game_mode::get_mode_name(current_mode.mode)),
+            MenuOption::Settings => "Settings".to_string(),
+            MenuOption::Achievements => "Achievements".to_string(),
         };
         **text = if is_selected {
             format!("> {} <", base_text)
@@ -495,19 +611,48 @@ fn game_over_system(
 fn update_score(
     mut score: ResMut<Score>,
     mut game_timer: ResMut<GameTimer>,
+    combo: Res<Combo>,
     time: Res<Time>,
     mut query: Query<&mut Text, With<ScoreText>>,
 ) {
     game_timer.elapsed += time.delta_secs();
 
-    // 每0.1秒加1分
-    let new_score = (game_timer.elapsed * 10.0) as u32;
-    if new_score != score.value {
-        score.value = new_score;
+    // 每0.1秒加1分，应用连击倍率
+    let base_score = (game_timer.elapsed * 10.0) as u32;
+    if base_score != score.value {
+        let increment = (base_score - score.value) as f32 * combo.multiplier;
+        score.value += increment as u32;
 
         // 更新UI
         if let Ok(mut text) = query.single_mut() {
             **text = format!("Score: {}", score.value);
+        }
+    }
+}
+
+/// 更新连击
+fn update_combo(
+    mut combo: ResMut<Combo>,
+    mut query: Query<&mut Text, With<ComboText>>,
+    time: Res<Time>,
+) {
+    if combo.count > 0 {
+        combo.timer -= time.delta_secs();
+        if combo.timer <= 0.0 {
+            // 连击超时，重置
+            combo.count = 0;
+            combo.multiplier = 1.0;
+            combo.timer = 0.0;
+
+            // 清空连击显示
+            if let Ok(mut text) = query.single_mut() {
+                **text = String::new();
+            }
+        } else {
+            // 更新连击显示
+            if let Ok(mut text) = query.single_mut() {
+                **text = format!("Combo x{} ({:.1}s)", combo.count, combo.timer);
+            }
         }
     }
 }
@@ -639,3 +784,11 @@ struct PauseUI;
 /// 分数文本标记
 #[derive(Component)]
 pub struct ScoreText;
+
+/// 连击文本标记
+#[derive(Component)]
+pub struct ComboText;
+
+/// 计时器文本标记
+#[derive(Component)]
+pub struct TimerText;
