@@ -1,0 +1,23 @@
+{
+  "high_score": 0,
+  "stats": {
+    "total_games_played": 0,
+    "total_score": 0,
+    "max_difficulty_reached": 0,
+    "powerups_collected": 0,
+    "obstacles_dodged": 0
+  },
+  "achievements": [
+    "FirstBlood",
+    "SpeedDemon",
+    "Survivor",
+    "FirstBlood",
+    "GameOver"
+  ],
+  "settings": {
+    "difficulty": "normal",
+    "master_volume": 1.0,
+    "music_volume": 1.0,
+    "sfx_volume": 1.0
+  }
+}

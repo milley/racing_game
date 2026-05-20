@@ -728,3 +728,180 @@ mod powerup_tests {
         assert!(!check_powerup_collision(player_pos, player_half, powerup_pos, powerup_half));
     }
 }
+
+/// ========== 菜单导航测试 ==========
+
+/// 菜单选项数量
+const MENU_OPTION_COUNT: usize = 3;
+
+/// 菜单选择状态
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct MenuSelection(usize);
+
+impl Default for MenuSelection {
+    fn default() -> Self {
+        MenuSelection(0)
+    }
+}
+
+/// 处理菜单上下导航
+fn handle_menu_navigation(current: MenuSelection, direction: i32) -> MenuSelection {
+    let new_idx = if direction < 0 {
+        if current.0 == 0 { MENU_OPTION_COUNT - 1 } else { current.0 - 1 }
+    } else {
+        (current.0 + 1) % MENU_OPTION_COUNT
+    };
+    MenuSelection(new_idx)
+}
+
+/// 根据菜单选择获取目标状态
+fn get_menu_target_state(selection: MenuSelection) -> &'static str {
+    match selection.0 {
+        0 => "Playing",
+        1 => "Settings",
+        2 => "Achievements",
+        _ => "Menu",
+    }
+}
+
+#[cfg(test)]
+mod menu_navigation_tests {
+    use super::*;
+
+    #[test]
+    fn test_menu_initial_selection() {
+        let selection = MenuSelection::default();
+        assert_eq!(selection.0, 0);
+        assert_eq!(get_menu_target_state(selection), "Playing");
+    }
+
+    #[test]
+    fn test_menu_navigate_down() {
+        let selection = MenuSelection(0);
+        let new_selection = handle_menu_navigation(selection, 1);
+        assert_eq!(new_selection.0, 1);
+        assert_eq!(get_menu_target_state(new_selection), "Settings");
+    }
+
+    #[test]
+    fn test_menu_navigate_down_twice() {
+        let selection = MenuSelection(0);
+        let selection = handle_menu_navigation(selection, 1);
+        let selection = handle_menu_navigation(selection, 1);
+        assert_eq!(selection.0, 2);
+        assert_eq!(get_menu_target_state(selection), "Achievements");
+    }
+
+    #[test]
+    fn test_menu_navigate_down_wrap() {
+        let selection = MenuSelection(2);
+        let new_selection = handle_menu_navigation(selection, 1);
+        assert_eq!(new_selection.0, 0); // Wrap to top
+    }
+
+    #[test]
+    fn test_menu_navigate_up() {
+        let selection = MenuSelection(1);
+        let new_selection = handle_menu_navigation(selection, -1);
+        assert_eq!(new_selection.0, 0);
+    }
+
+    #[test]
+    fn test_menu_navigate_up_wrap() {
+        let selection = MenuSelection(0);
+        let new_selection = handle_menu_navigation(selection, -1);
+        assert_eq!(new_selection.0, 2); // Wrap to bottom
+    }
+
+    #[test]
+    fn test_menu_cycle_all_options() {
+        let mut selection = MenuSelection::default();
+
+        // 向下遍历所有选项
+        for i in 0..MENU_OPTION_COUNT {
+            assert_eq!(selection.0, i);
+            selection = handle_menu_navigation(selection, 1);
+        }
+        // 应该回到起点
+        assert_eq!(selection.0, 0);
+
+        // 向上遍历所有选项
+        for i in (0..MENU_OPTION_COUNT).rev() {
+            selection = handle_menu_navigation(selection, -1);
+            assert_eq!(selection.0, i);
+        }
+    }
+}
+
+/// ========== 设置导航测试 ==========
+
+/// 设置选项数量
+const SETTINGS_OPTION_COUNT: usize = 4;
+
+/// 设置选择状态
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SettingsSelection(usize);
+
+impl Default for SettingsSelection {
+    fn default() -> Self {
+        SettingsSelection(0)
+    }
+}
+
+/// 处理设置上下导航
+fn handle_settings_navigation(current: SettingsSelection, direction: i32) -> SettingsSelection {
+    let new_idx = if direction < 0 {
+        if current.0 == 0 { SETTINGS_OPTION_COUNT - 1 } else { current.0 - 1 }
+    } else {
+        (current.0 + 1) % SETTINGS_OPTION_COUNT
+    };
+    SettingsSelection(new_idx)
+}
+
+#[cfg(test)]
+mod settings_navigation_tests {
+    use super::*;
+
+    #[test]
+    fn test_settings_initial_selection() {
+        let selection = SettingsSelection::default();
+        assert_eq!(selection.0, 0); // Difficulty
+    }
+
+    #[test]
+    fn test_settings_navigate_down() {
+        let selection = SettingsSelection(0);
+        let new_selection = handle_settings_navigation(selection, 1);
+        assert_eq!(new_selection.0, 1); // Master Volume
+    }
+
+    #[test]
+    fn test_settings_navigate_down_wrap() {
+        let selection = SettingsSelection(SETTINGS_OPTION_COUNT - 1);
+        let new_selection = handle_settings_navigation(selection, 1);
+        assert_eq!(new_selection.0, 0); // Wrap to top
+    }
+
+    #[test]
+    fn test_settings_navigate_up_wrap() {
+        let selection = SettingsSelection(0);
+        let new_selection = handle_settings_navigation(selection, -1);
+        assert_eq!(new_selection.0, SETTINGS_OPTION_COUNT - 1); // Wrap to bottom
+    }
+
+    #[test]
+    fn test_settings_all_options_accessible() {
+        let mut selection = SettingsSelection::default();
+        let mut visited = vec![selection.0];
+
+        for _ in 0..SETTINGS_OPTION_COUNT {
+            selection = handle_settings_navigation(selection, 1);
+            visited.push(selection.0);
+        }
+
+        // 应该能访问所有选项
+        for i in 0..SETTINGS_OPTION_COUNT {
+            assert!(visited.contains(&i), "Option {} should be accessible", i);
+        }
+    }
+}

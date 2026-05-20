@@ -169,6 +169,8 @@ fn collect_powerups(
     powerup_query: Query<(Entity, &Transform, &PowerUpType), With<PowerUp>>,
     config: Res<PowerUpConfig>,
     obstacle_query: Query<Entity, With<crate::obstacle::Obstacle>>,
+    mut achievement_tracker: ResMut<crate::achievement::AchievementTracker>,
+    mut save_data: ResMut<crate::save::SaveData>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
@@ -185,6 +187,9 @@ fn collect_powerups(
         if (player_pos.x - powerup_pos.x).abs() < player_half.x + powerup_half.x
             && (player_pos.y - powerup_pos.y).abs() < player_half.y + powerup_half.y
         {
+            // 记录道具收集成就
+            crate::achievement::record_powerup_collection(&mut achievement_tracker, &mut save_data);
+
             // 收集道具
             match powerup_type {
                 PowerUpType::Shield => {

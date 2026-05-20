@@ -165,6 +165,8 @@ fn check_collisions(
     player_query: Query<&Transform, With<Player>>,
     obstacle_query: Query<(Entity, &Transform, &ObstacleHitbox), With<Obstacle>>,
     player_config: Res<PlayerConfig>,
+    mut achievement_tracker: ResMut<crate::achievement::AchievementTracker>,
+    mut save_data: ResMut<crate::save::SaveData>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
@@ -185,6 +187,9 @@ fn check_collisions(
                 commands.entity(obstacle_entity).despawn();
                 continue;
             }
+
+            // 记录碰撞成就
+            crate::achievement::record_collision(&mut achievement_tracker, &mut save_data);
 
             // 生成碰撞粒子效果
             spawn_explosion(&mut commands, player_transform.translation, &particle_config);

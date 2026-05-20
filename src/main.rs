@@ -10,6 +10,9 @@ mod life;
 mod powerup;
 mod audio;
 mod graphics;
+mod save;
+mod settings;
+mod achievement;
 #[cfg(test)]
 mod tests;
 
