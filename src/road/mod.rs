@@ -144,21 +144,6 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
         ));
     }
 
-    // 道路边线（白色实线）
-    let left_edge_x = -game_config.road_width / 2.0 + 5.0;
-    commands.spawn((
-        Sprite::from_color(Color::srgb(1.0, 1.0, 1.0), Vec2::new(4.0, 800.0)),
-        Transform::from_xyz(left_edge_x, 0.0, 0.5),
-        GameEntity,
-    ));
-
-    let right_edge_x = game_config.road_width / 2.0 - 5.0;
-    commands.spawn((
-        Sprite::from_color(Color::srgb(1.0, 1.0, 1.0), Vec2::new(4.0, 800.0)),
-        Transform::from_xyz(right_edge_x, 0.0, 0.5),
-        GameEntity,
-    ));
-
     // 中央虚线（黄色）
     let total_height = road_config.line_height + road_config.line_gap;
     let line_count = (800.0 / total_height).ceil() as i32 + 2;

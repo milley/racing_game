@@ -21,7 +21,10 @@
     "SpeedDemon",
     "Survivor",
     "Collector",
-    "GameOver"
+    "GameOver",
+    "FirstBlood",
+    "GameOver",
+    "FirstBlood"
   ],
   "settings": {
     "difficulty": "normal",

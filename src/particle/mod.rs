@@ -57,10 +57,7 @@ pub struct ExplosionParticle {
 
 /// 速度线标记
 #[derive(Component)]
-struct SpeedLine {
-    /// 原始Y位置
-    base_y: f32,
-}
+struct SpeedLine;
 
 /// 生成爆炸粒子
 pub fn spawn_explosion(
@@ -127,6 +124,13 @@ fn update_particles(
     }
 }
 
+/// 清理粒子
+fn cleanup_particles(mut commands: Commands, query: Query<Entity, With<ExplosionParticle>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
 /// 生成速度线
 fn spawn_speed_lines(mut commands: Commands) {
     // 左侧速度线
@@ -135,7 +139,7 @@ fn spawn_speed_lines(mut commands: Commands) {
         commands.spawn((
             Sprite::from_color(Color::srgba(1.0, 1.0, 1.0, 0.3), Vec2::new(2.0, 40.0)),
             Transform::from_xyz(-180.0, y, 0.5),
-            SpeedLine { base_y: y },
+            SpeedLine,
             GameEntity,
         ));
     }
@@ -146,7 +150,7 @@ fn spawn_speed_lines(mut commands: Commands) {
         commands.spawn((
             Sprite::from_color(Color::srgba(1.0, 1.0, 1.0, 0.3), Vec2::new(2.0, 40.0)),
             Transform::from_xyz(180.0, y, 0.5),
-            SpeedLine { base_y: y },
+            SpeedLine,
             GameEntity,
         ));
     }
@@ -154,13 +158,13 @@ fn spawn_speed_lines(mut commands: Commands) {
 
 /// 更新速度线
 fn update_speed_lines(
-    mut query: Query<(&mut Transform, &mut Sprite, &SpeedLine)>,
+    mut query: Query<(&mut Transform, &mut Sprite), With<SpeedLine>>,
     difficulty: Res<Difficulty>,
     time: Res<Time>,
 ) {
     let speed = 300.0 * difficulty.speed_multiplier;
 
-    for (mut transform, mut sprite, _speed_line) in query.iter_mut() {
+    for (mut transform, mut sprite) in query.iter_mut() {
         // 向下移动
         transform.translation.y -= speed * time.delta_secs();
 
@@ -172,12 +176,5 @@ fn update_speed_lines(
         // 根据速度调整透明度
         let alpha = 0.2 + (difficulty.speed_multiplier - 1.0) * 0.3;
         sprite.color.set_alpha(alpha.min(0.6));
-    }
-}
-
-/// 清理粒子
-fn cleanup_particles(mut commands: Commands, query: Query<Entity, With<ExplosionParticle>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
     }
 }
