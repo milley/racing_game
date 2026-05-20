@@ -90,9 +90,9 @@ struct RoadsideDecoration {
 
 /// 生成道路
 fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config: Res<RoadConfig>) {
-    // 背景（草地）
+    // 背景（深色地面，减少与道路的反差）
     commands.spawn((
-        Sprite::from_color(Color::srgb(0.15, 0.4, 0.15), Vec2::new(600.0, 800.0)),
+        Sprite::from_color(Color::srgb(0.18, 0.16, 0.14), Vec2::new(600.0, 800.0)),
         Transform::from_xyz(0.0, 0.0, -0.5),
         GameEntity,
     ));

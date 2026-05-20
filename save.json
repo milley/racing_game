@@ -24,7 +24,9 @@
     "GameOver",
     "FirstBlood",
     "GameOver",
-    "FirstBlood"
+    "FirstBlood",
+    "FirstBlood",
+    "GameOver"
   ],
   "settings": {
     "difficulty": "normal",
