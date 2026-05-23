@@ -88,6 +88,10 @@ struct RoadsideDecoration {
     is_left: bool,
 }
 
+/// 道路背景标记
+#[derive(Component)]
+struct RoadBackground;
+
 /// 生成道路
 fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config: Res<RoadConfig>) {
     // 背景（深色地面，减少与道路的反差）
@@ -97,10 +101,12 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
         GameEntity,
     ));
 
-    // 道路背景（深灰色沥青）
+    // 道路背景（深灰色沥青，加宽以覆盖弯道偏移）
+    let road_display_width = game_config.road_width + 100.0;
     commands.spawn((
-        Sprite::from_color(Color::srgb(0.25, 0.25, 0.25), Vec2::new(game_config.road_width, 800.0)),
+        Sprite::from_color(Color::srgb(0.25, 0.25, 0.25), Vec2::new(road_display_width, 800.0)),
         Transform::from_xyz(0.0, 0.0, 0.0),
+        RoadBackground,
         GameEntity,
     ));
 
@@ -190,7 +196,7 @@ pub fn calculate_curve_offset(y_pos: f32, curvature: f32) -> f32 {
     let perspective = y_normalized * y_normalized; // 二次曲线，远处变化更剧烈
 
     // 弯道偏移：远处偏移大
-    curvature * perspective * 100.0
+    curvature * perspective * 60.0
 }
 
 /// 道路标线循环滚动逻辑
@@ -213,6 +219,7 @@ pub fn calculate_road_line_offset(
 /// 更新道路标线（滚动 + 弯道效果）
 fn update_road_lines(
     mut query: Query<(&mut Transform, &mut RoadLine)>,
+    mut bg_query: Query<&mut Transform, (With<RoadBackground>, Without<RoadLine>)>,
     road_config: Res<RoadConfig>,
     difficulty: Res<Difficulty>,
     curvature: Res<Curvature>,
@@ -220,6 +227,11 @@ fn update_road_lines(
 ) {
     let total_height = road_config.line_height + road_config.line_gap;
     let adjusted_speed = road_config.scroll_speed * difficulty.speed_multiplier;
+
+    // 道路背景跟随弯道偏移（使用近处 y=0 的偏移）
+    if let Ok(mut bg_transform) = bg_query.single_mut() {
+        bg_transform.translation.x = calculate_curve_offset(0.0, curvature.value);
+    }
 
     for (mut transform, mut road_line) in query.iter_mut() {
         // 垂直滚动
@@ -284,9 +296,9 @@ fn update_curvature(
     // 当曲率稳定后，随机改变目标曲率
     if curvature.curve_timer <= 0.0 && diff.abs() < 0.1 {
         // 随机选择新的弯道方向
-        // 曲率范围: -1.5 到 1.5 (更大的弯道)
+        // 曲率范围: -0.8 到 0.8
         curvature.target = if rand::random::<f32>() < 0.5 {
-            (rand::random::<f32>() - 0.5) * 3.0  // -1.5 到 1.5
+            (rand::random::<f32>() - 0.5) * 1.6  // -0.8 到 0.8
         } else {
             0.0  // 直道
         };

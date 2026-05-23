@@ -9,6 +9,7 @@ use crate::{
     powerup::ActivePowerUps,
     particle::{spawn_explosion, ParticleConfig},
     graphics::CarType,
+    road::calculate_curve_offset,
 };
 
 /// 障碍物实体标记（公开供其他模块使用）
@@ -18,6 +19,10 @@ pub struct Obstacle;
 /// 已被闪避标记
 #[derive(Component)]
 struct Dodged;
+
+/// 障碍物原始X位置（用于弯道偏移计算）
+#[derive(Component)]
+struct ObstacleBaseX(f32);
 
 /// 障碍物碰撞箱组件
 #[derive(Component)]
@@ -148,6 +153,7 @@ fn spawn_obstacles(
             Obstacle,
             GameEntity,
             crate::graphics::CarTypeComponent(car_type),
+            ObstacleBaseX(x),
             ObstacleHitbox {
                 half_size: hitbox_size / 2.0,
             },
@@ -158,13 +164,14 @@ fn spawn_obstacles(
 /// 移动障碍物
 fn move_obstacles(
     mut commands: Commands,
-    mut query: Query<(Entity, &mut Transform, Option<&Dodged>), (With<Obstacle>, Without<Player>)>,
+    mut query: Query<(Entity, &mut Transform, &ObstacleBaseX, Option<&Dodged>), (With<Obstacle>, Without<Player>)>,
     config: Res<ObstacleConfig>,
     difficulty: Res<Difficulty>,
     time: Res<Time>,
     player_query: Query<&Transform, (With<Player>, Without<Obstacle>)>,
     mut combo: ResMut<Combo>,
     active_powerups: Res<ActivePowerUps>,
+    curvature: Res<crate::road::Curvature>,
 ) {
     // 根据难度调整速度
     let mut adjusted_speed = config.speed * difficulty.speed_multiplier;
@@ -177,8 +184,12 @@ fn move_obstacles(
     // 获取玩家位置
     let player_y = player_query.single().map(|t| t.translation.y).unwrap_or(-220.0);
 
-    for (entity, mut transform, dodged) in query.iter_mut() {
+    for (entity, mut transform, base_x, dodged) in query.iter_mut() {
         transform.translation.y -= adjusted_speed * time.delta_secs();
+
+        // 弯道偏移：障碍物跟随道路弯曲
+        let curve_offset = calculate_curve_offset(transform.translation.y, curvature.value);
+        transform.translation.x = base_x.0 + curve_offset;
 
         // 检测闪避：障碍物通过玩家下方且未被标记
         if transform.translation.y < player_y - 30.0 && dodged.is_none() {
