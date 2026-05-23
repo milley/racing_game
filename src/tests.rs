@@ -1,1171 +1,710 @@
-//! 游戏核心逻辑测试模块
-//!
-//! 使用 Bevy 测试框架进行单元测试
-
-use bevy::prelude::*;
-
-/// 测试辅助：创建最小化的测试 App
-fn create_test_app() -> App {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app
-}
-
-/// ========== 碰撞检测测试 ==========
-
-/// AABB 碰撞检测核心逻辑
-/// 返回两个矩形是否碰撞
-pub fn check_aabb_collision(
-    pos_a: Vec2,
-    half_size_a: Vec2,
-    pos_b: Vec2,
-    half_size_b: Vec2,
-) -> bool {
-    (pos_a.x - pos_b.x).abs() < half_size_a.x + half_size_b.x
-        && (pos_a.y - pos_b.y).abs() < half_size_a.y + half_size_b.y
-}
-
 #[cfg(test)]
-mod collision_tests {
-    use super::*;
+mod tests {
+    use crate::game::{
+        GameState, Combo, MENU_OPTION_COUNT,
+        handle_menu_navigation, update_combo_timer,
+        calculate_difficulty_level, calculate_speed_multiplier,
+        calculate_spawn_interval_multiplier, calculate_base_score,
+        calculate_score_increment,
+    };
+    use crate::obstacle::{
+        check_aabb_collision, should_despawn_obstacle,
+        record_dodge, reset_combo_on_collision,
+    };
+    use crate::player::clamp_player_position;
+    use crate::road::calculate_road_line_offset;
+    use crate::life::{PlayerLife, LifeConfig, handle_collision};
+    use crate::powerup::{
+        ActivePowerUps,
+        check_powerup_collision, update_shield_timer, activate_shield,
+    };
+    use crate::settings::DifficultyLevel;
+    use crate::game_mode::{GameMode, cycle_game_mode, get_mode_lives, get_mode_time_limit};
+    use bevy::math::Vec2;
 
-    #[test]
-    fn test_collision_direct_hit() {
-        // 两矩形完全重叠
-        let pos_a = Vec2::new(0.0, 0.0);
-        let half_a = Vec2::new(20.0, 30.0);
-        let pos_b = Vec2::new(0.0, 0.0);
-        let half_b = Vec2::new(17.5, 25.0);
+    // ========== 碰撞检测测试 ==========
 
-        assert!(check_aabb_collision(pos_a, half_a, pos_b, half_b));
+    mod collision_tests {
+        use super::*;
+
+        #[test]
+        fn test_collision_detected() {
+            let result = check_aabb_collision(
+                Vec2::new(0.0, 0.0), Vec2::new(25.0, 25.0),
+                Vec2::new(10.0, 10.0), Vec2::new(25.0, 25.0),
+            );
+            assert!(result);
+        }
+
+        #[test]
+        fn test_no_collision_separated_x() {
+            let result = check_aabb_collision(
+                Vec2::new(0.0, 0.0), Vec2::new(25.0, 25.0),
+                Vec2::new(100.0, 0.0), Vec2::new(25.0, 25.0),
+            );
+            assert!(!result);
+        }
+
+        #[test]
+        fn test_no_collision_separated_y() {
+            let result = check_aabb_collision(
+                Vec2::new(0.0, 0.0), Vec2::new(25.0, 25.0),
+                Vec2::new(0.0, 100.0), Vec2::new(25.0, 25.0),
+            );
+            assert!(!result);
+        }
+
+        #[test]
+        fn test_edge_collision() {
+            let result = check_aabb_collision(
+                Vec2::new(0.0, 0.0), Vec2::new(25.0, 25.0),
+                Vec2::new(49.9, 0.0), Vec2::new(25.0, 25.0),
+            );
+            assert!(result);
+        }
+
+        #[test]
+        fn test_no_collision_at_edge() {
+            let result = check_aabb_collision(
+                Vec2::new(0.0, 0.0), Vec2::new(25.0, 25.0),
+                Vec2::new(50.1, 0.0), Vec2::new(25.0, 25.0),
+            );
+            assert!(!result);
+        }
     }
 
-    #[test]
-    fn test_collision_partial_overlap() {
-        // 部分重叠
-        let pos_a = Vec2::new(0.0, 0.0);
-        let half_a = Vec2::new(20.0, 30.0); // 宽40, 高60
-        let pos_b = Vec2::new(30.0, 40.0); // 偏移
-        let half_b = Vec2::new(17.5, 25.0); // 宽35, 高50
+    // ========== 边界限制测试 ==========
 
-        // x方向: |0-30|=30 < 20+17.5=37.5 ✓
-        // y方向: |0-40|=40 < 30+25=55 ✓
-        assert!(check_aabb_collision(pos_a, half_a, pos_b, half_b));
+    mod boundary_tests {
+        use super::*;
+
+        #[test]
+        fn test_player_at_center() {
+            let result = clamp_player_position(0.0, 400.0, 40.0);
+            assert_eq!(result, 0.0);
+        }
+
+        #[test]
+        fn test_player_at_right_boundary() {
+            let result = clamp_player_position(200.0, 400.0, 40.0);
+            assert!((result - 180.0).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_player_at_left_boundary() {
+            let result = clamp_player_position(-200.0, 400.0, 40.0);
+            assert!((result - (-180.0)).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_player_exceeds_right_boundary() {
+            let result = clamp_player_position(300.0, 400.0, 40.0);
+            assert!((result - 180.0).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_player_exceeds_left_boundary() {
+            let result = clamp_player_position(-300.0, 400.0, 40.0);
+            assert!((result - (-180.0)).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_player_within_boundary() {
+            let result = clamp_player_position(50.0, 400.0, 40.0);
+            assert_eq!(result, 50.0);
+        }
     }
 
-    #[test]
-    fn test_collision_edge_touching() {
-        // 边缘刚好接触（不算碰撞，需要严格小于）
-        let pos_a = Vec2::new(0.0, 0.0);
-        let half_a = Vec2::new(20.0, 30.0);
-        let pos_b = Vec2::new(37.5, 0.0); // 刚好在边缘
-        let half_b = Vec2::new(17.5, 25.0);
+    // ========== 道路滚动测试 ==========
 
-        // x方向: |0-37.5|=37.5 < 20+17.5=37.5 是 false（不小于）
-        assert!(!check_aabb_collision(pos_a, half_a, pos_b, half_b));
+    mod road_scroll_tests {
+        use super::*;
+
+        #[test]
+        fn test_road_line_scroll() {
+            let result = calculate_road_line_offset(100.0, 200.0, 0.016, 60.0, -720.0, 720.0);
+            assert!((result - 96.8).abs() < 0.01);
+        }
+
+        #[test]
+        fn test_road_line_loop() {
+            let total_height = 60.0;
+            let loop_threshold = -total_height * 12.0;
+            let loop_reset = total_height * 12.0;
+            let result = calculate_road_line_offset(-710.0, 200.0, 0.016, total_height, loop_threshold, loop_reset);
+            assert!(result > loop_threshold);
+        }
+
+        #[test]
+        fn test_road_line_no_scroll() {
+            let result = calculate_road_line_offset(100.0, 0.0, 0.016, 60.0, -720.0, 720.0);
+            assert_eq!(result, 100.0);
+        }
     }
 
-    #[test]
-    fn test_collision_no_overlap_x() {
-        // X 轴无重叠
-        let pos_a = Vec2::new(0.0, 0.0);
-        let half_a = Vec2::new(20.0, 30.0);
-        let pos_b = Vec2::new(50.0, 0.0); // 完全分离
-        let half_b = Vec2::new(17.5, 25.0);
+    // ========== 障碍物测试 ==========
 
-        assert!(!check_aabb_collision(pos_a, half_a, pos_b, half_b));
+    mod obstacle_tests {
+        use super::*;
+
+        #[test]
+        fn test_should_despawn() {
+            assert!(should_despawn_obstacle(-500.0, -400.0));
+        }
+
+        #[test]
+        fn test_should_not_despawn() {
+            assert!(!should_despawn_obstacle(-300.0, -400.0));
+        }
+
+        #[test]
+        fn test_despawn_at_boundary() {
+            assert!(!should_despawn_obstacle(-400.0, -400.0));
+        }
     }
 
-    #[test]
-    fn test_collision_no_overlap_y() {
-        // Y 轴无重叠
-        let pos_a = Vec2::new(0.0, 0.0);
-        let half_a = Vec2::new(20.0, 30.0);
-        let pos_b = Vec2::new(0.0, 60.0);
-        let half_b = Vec2::new(17.5, 25.0);
+    // ========== 生命系统测试 ==========
 
-        assert!(!check_aabb_collision(pos_a, half_a, pos_b, half_b));
-    }
+    mod life_tests {
+        use super::*;
 
-    #[test]
-    fn test_collision_no_overlap_diagonal() {
-        // 完全分离（对角）
-        let pos_a = Vec2::new(0.0, 0.0);
-        let half_a = Vec2::new(20.0, 30.0);
-        let pos_b = Vec2::new(100.0, 100.0);
-        let half_b = Vec2::new(17.5, 25.0);
-
-        assert!(!check_aabb_collision(pos_a, half_a, pos_b, half_b));
-    }
-}
-
-/// ========== 边界限制测试 ==========
-
-/// 玩家位置边界限制逻辑
-pub fn clamp_player_position(x: f32, road_width: f32, player_width: f32) -> f32 {
-    let half_road = road_width / 2.0 - player_width / 2.0;
-    x.clamp(-half_road, half_road)
-}
-
-#[cfg(test)]
-mod boundary_tests {
-    use super::*;
-
-    #[test]
-    fn test_clamp_in_bounds() {
-        // 在边界内，不变化
-        let x = 50.0;
-        let road_width = 300.0;
-        let player_width = 40.0;
-
-        let result = clamp_player_position(x, road_width, player_width);
-        assert!((result - 50.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_clamp_at_boundary() {
-        // 刚好在边界上
-        let x = 130.0; // road_width/2 - player_width/2 = 150 - 20 = 130
-        let road_width = 300.0;
-        let player_width = 40.0;
-
-        let result = clamp_player_position(x, road_width, player_width);
-        assert!((result - 130.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_clamp_exceed_right_boundary() {
-        // 超出右边界
-        let x = 200.0;
-        let road_width = 300.0;
-        let player_width = 40.0;
-
-        let result = clamp_player_position(x, road_width, player_width);
-        assert!((result - 130.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_clamp_exceed_left_boundary() {
-        // 超出左边界
-        let x = -200.0;
-        let road_width = 300.0;
-        let player_width = 40.0;
-
-        let result = clamp_player_position(x, road_width, player_width);
-        assert!((result - (-130.0)).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_clamp_zero() {
-        // 在中心位置
-        let x = 0.0;
-        let road_width = 300.0;
-        let player_width = 40.0;
-
-        let result = clamp_player_position(x, road_width, player_width);
-        assert!((result - 0.0).abs() < 0.001);
-    }
-}
-
-/// ========== 道路标线滚动测试 ==========
-
-/// 道路标线循环滚动逻辑
-pub fn calculate_road_line_offset(
-    current_offset: f32,
-    scroll_speed: f32,
-    delta_secs: f32,
-    line_height: f32,
-    line_gap: f32,
-    screen_bottom: f32,
-) -> f32 {
-    let total_height = line_height + line_gap;
-    let new_offset = current_offset - scroll_speed * delta_secs;
-
-    // 循环滚动
-    if new_offset < screen_bottom - total_height {
-        new_offset + total_height * 10.0
-    } else {
-        new_offset
-    }
-}
-
-#[cfg(test)]
-mod road_scroll_tests {
-    use super::*;
-
-    #[test]
-    fn test_scroll_normal_movement() {
-        // 正常滚动，不触发循环
-        let offset = calculate_road_line_offset(
-            0.0,    // current_offset
-            200.0,  // scroll_speed
-            0.016,  // delta_secs (60fps)
-            40.0,   // line_height
-            60.0,   // line_gap
-            -400.0, // screen_bottom
-        );
-
-        // 0 - 200 * 0.016 = -3.2
-        assert!((offset - (-3.2)).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_scroll_triggers_loop() {
-        // 滚动到底部，触发循环
-        let offset = calculate_road_line_offset(
-            -450.0, // 接近底部
-            200.0,
-            0.016,
-            40.0,
-            60.0,
-            -400.0,
-        );
-
-        // -450 - 3.2 = -453.2 < -400 - 100 = -500? No
-        // 实际: -453.2 < -400 - 100 = -500 是 false
-        // 所以不会循环，返回 -453.2
-        assert!((offset - (-453.2)).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_scroll_loop_triggered() {
-        // 确实触发循环的情况
-        let offset = calculate_road_line_offset(
-            -510.0, // 超过 screen_bottom - total_height = -500
-            200.0,
-            0.016,
-            40.0,
-            60.0,
-            -400.0,
-        );
-
-        // -510 - 3.2 = -513.2 < -500 ✓
-        // 循环: -513.2 + 100 * 10 = 486.8
-        assert!((offset - 486.8).abs() < 0.001);
-    }
-}
-
-/// ========== 障碍物移除测试 ==========
-
-/// 判断障碍物是否应该被移除
-pub fn should_despawn_obstacle(y_position: f32, screen_bottom: f32) -> bool {
-    y_position < screen_bottom
-}
-
-#[cfg(test)]
-mod obstacle_tests {
-    use super::*;
-
-    #[test]
-    fn test_despawn_below_screen() {
-        assert!(should_despawn_obstacle(-450.0, -400.0));
-    }
-
-    #[test]
-    fn test_despawn_at_boundary() {
-        // 刚好在边界上，不删除（需要小于）
-        assert!(!should_despawn_obstacle(-400.0, -400.0));
-    }
-
-    #[test]
-    fn test_despawn_above_screen() {
-        // 在屏幕内
-        assert!(!should_despawn_obstacle(100.0, -400.0));
-    }
-
-    #[test]
-    fn test_despawn_on_screen() {
-        // 在屏幕中间
-        assert!(!should_despawn_obstacle(0.0, -400.0));
-    }
-}
-
-/// ========== Bevy 集成测试 ==========
-
-#[cfg(test)]
-mod bevy_integration_tests {
-    use super::*;
-    use crate::player::{Player, PlayerConfig};
-
-    #[test]
-    fn test_spawn_player() {
-        let mut app = create_test_app();
-        app.init_resource::<PlayerConfig>();
-        app.init_resource::<crate::GameConfig>();
-
-        // 手动生成玩家
-        let _config = app.world().resource::<PlayerConfig>();
-        let entity = app.world_mut().spawn((
-            Transform::from_xyz(0.0, -220.0, 1.0),
-            Player,
-        )).id();
-
-        // 验证实体存在
-        assert!(app.world().get::<Player>(entity).is_some());
-    }
-
-    #[test]
-    fn test_player_config_default() {
-        let config = PlayerConfig::default();
-
-        assert!((config.speed - 300.0).abs() < 0.001);
-        assert!((config.width - 40.0).abs() < 0.001);
-        assert!((config.height - 60.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_game_config_default() {
-        let config = crate::GameConfig::default();
-
-        assert!((config.road_width - 300.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_timer_creation() {
-        use std::time::Duration;
-
-        let timer = Timer::from_seconds(1.5, TimerMode::Repeating);
-
-        assert_eq!(timer.duration(), Duration::from_secs_f32(1.5));
-        assert!(timer.mode() == TimerMode::Repeating);
-    }
-}
-
-/// ========== 游戏状态测试 ==========
-
-#[cfg(test)]
-mod game_state_tests {
-    use crate::game::GameState;
-
-    #[test]
-    fn test_game_state_default() {
-        let state = GameState::default();
-        assert!(matches!(state, GameState::Menu));
-    }
-
-    #[test]
-    fn test_game_state_variants() {
-        // 确保所有状态都可用
-        let menu = GameState::Menu;
-        let playing = GameState::Playing;
-        let game_over = GameState::GameOver;
-
-        assert!(menu != playing);
-        assert!(playing != game_over);
-        assert!(menu != game_over);
-    }
-}
-
-/// ========== 性能基准测试（可选） ==========
-
-#[cfg(test)]
-mod benchmark_tests {
-    use super::*;
-
-    #[test]
-    fn test_collision_detection_performance() {
-        // 测试大量碰撞检测的性能
-        let pos_a = Vec2::new(0.0, 0.0);
-        let half_a = Vec2::new(20.0, 30.0);
-
-        let start = std::time::Instant::now();
-
-        for _ in 0..10000 {
-            for x in -200..=200 {
-                for y in -200..=200 {
-                    let pos_b = Vec2::new(x as f32, y as f32);
-                    let half_b = Vec2::new(17.5, 25.0);
-                    check_aabb_collision(pos_a, half_a, pos_b, half_b);
-                }
+        fn create_player_life(lives: u32) -> PlayerLife {
+            PlayerLife {
+                lives,
+                is_invincible: false,
+                invincibility_timer: 0.0,
             }
         }
 
-        let elapsed = start.elapsed();
-        println!("10000次碰撞检测耗时: {:?}", elapsed);
-
-        // 确保在合理时间内完成（非严格限制）
-        assert!(elapsed.as_millis() < 1000);
-    }
-}
-
-/// ========== 生命系统测试 ==========
-
-/// 玩家生命状态
-#[derive(Clone, Copy)]
-pub struct TestPlayerLife {
-    pub lives: u32,
-    pub is_invincible: bool,
-    pub invincibility_timer: f32,
-}
-
-/// 处理碰撞逻辑（测试用副本）
-pub fn handle_collision_test(
-    player_life: &mut TestPlayerLife,
-    _max_lives: u32,
-    invincibility_duration: f32,
-) -> bool {
-    if player_life.is_invincible {
-        return false;
-    }
-
-    if player_life.lives > 0 {
-        player_life.lives -= 1;
-    }
-
-    if player_life.lives == 0 {
-        true
-    } else {
-        player_life.is_invincible = true;
-        player_life.invincibility_timer = invincibility_duration;
-        false
-    }
-}
-
-#[cfg(test)]
-mod life_tests {
-    use super::*;
-
-    #[test]
-    fn test_collision_reduces_life() {
-        let mut life = TestPlayerLife {
-            lives: 3,
-            is_invincible: false,
-            invincibility_timer: 0.0,
-        };
-
-        let result = handle_collision_test(&mut life, 3, 2.0);
-
-        assert!(!result); // 游戏未结束
-        assert_eq!(life.lives, 2);
-        assert!(life.is_invincible); // 触发无敌
-    }
-
-    #[test]
-    fn test_collision_invincible_no_damage() {
-        let mut life = TestPlayerLife {
-            lives: 3,
-            is_invincible: true,
-            invincibility_timer: 1.0,
-        };
-
-        let result = handle_collision_test(&mut life, 3, 2.0);
-
-        assert!(!result);
-        assert_eq!(life.lives, 3); // 生命不变
-    }
-
-    #[test]
-    fn test_collision_game_over() {
-        let mut life = TestPlayerLife {
-            lives: 1,
-            is_invincible: false,
-            invincibility_timer: 0.0,
-        };
-
-        let result = handle_collision_test(&mut life, 3, 2.0);
-
-        assert!(result); // 游戏结束
-        assert_eq!(life.lives, 0);
-    }
-
-    #[test]
-    fn test_multiple_collisions() {
-        let mut life = TestPlayerLife {
-            lives: 3,
-            is_invincible: false,
-            invincibility_timer: 0.0,
-        };
-
-        // 第一次碰撞
-        handle_collision_test(&mut life, 3, 2.0);
-        assert_eq!(life.lives, 2);
-
-        // 无敌期间再次碰撞
-        handle_collision_test(&mut life, 3, 2.0);
-        assert_eq!(life.lives, 2); // 生命不变
-
-        // 无敌结束
-        life.is_invincible = false;
-        handle_collision_test(&mut life, 3, 2.0);
-        assert_eq!(life.lives, 1);
-    }
-}
-
-/// ========== 难度系统测试 ==========
-
-/// 计算难度等级
-pub fn calculate_difficulty_level(elapsed_time: f32, interval: f32) -> u32 {
-    (elapsed_time / interval) as u32 + 1
-}
-
-/// 计算速度倍率
-pub fn calculate_speed_multiplier(level: u32) -> f32 {
-    1.0 + (level - 1) as f32 * 0.15
-}
-
-/// 计算生成间隔倍率
-pub fn calculate_spawn_interval_multiplier(level: u32) -> f32 {
-    (1.0 - (level - 1) as f32 * 0.10).max(0.3)
-}
-
-#[cfg(test)]
-mod difficulty_tests {
-    use super::*;
-
-    #[test]
-    fn test_initial_difficulty() {
-        let level = calculate_difficulty_level(0.0, 10.0);
-        assert_eq!(level, 1);
-
-        let speed = calculate_speed_multiplier(1);
-        assert!((speed - 1.0).abs() < 0.001);
-
-        let spawn = calculate_spawn_interval_multiplier(1);
-        assert!((spawn - 1.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_difficulty_increase() {
-        // 10秒后升到2级
-        let level = calculate_difficulty_level(10.0, 10.0);
-        assert_eq!(level, 2);
-
-        let speed = calculate_speed_multiplier(2);
-        assert!((speed - 1.15).abs() < 0.001);
-
-        let spawn = calculate_spawn_interval_multiplier(2);
-        assert!((spawn - 0.9).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_high_difficulty() {
-        // 50秒后升到6级
-        let level = calculate_difficulty_level(50.0, 10.0);
-        assert_eq!(level, 6);
-
-        let speed = calculate_speed_multiplier(6);
-        assert!((speed - 1.75).abs() < 0.001);
-
-        let spawn = calculate_spawn_interval_multiplier(6);
-        assert!((spawn - 0.5).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_spawn_interval_minimum() {
-        // 高等级时生成间隔有最小值限制
-        let spawn = calculate_spawn_interval_multiplier(10);
-        assert!((spawn - 0.3).abs() < 0.001); // 最低0.3
-
-        let spawn = calculate_spawn_interval_multiplier(20);
-        assert!((spawn - 0.3).abs() < 0.001); // 不会低于0.3
-    }
-}
-
-/// ========== 分数系统测试 ==========
-
-/// 计算分数
-pub fn calculate_score(elapsed_time: f32) -> u32 {
-    (elapsed_time * 10.0) as u32
-}
-
-#[cfg(test)]
-mod score_tests {
-    use super::*;
-
-    #[test]
-    fn test_initial_score() {
-        let score = calculate_score(0.0);
-        assert_eq!(score, 0);
-    }
-
-    #[test]
-    fn test_score_after_one_second() {
-        let score = calculate_score(1.0);
-        assert_eq!(score, 10);
-    }
-
-    #[test]
-    fn test_score_after_ten_seconds() {
-        let score = calculate_score(10.0);
-        assert_eq!(score, 100);
-    }
-
-    #[test]
-    fn test_score_precision() {
-        // 0.1秒 = 1分
-        let score = calculate_score(0.1);
-        assert_eq!(score, 1);
-
-        // 0.15秒 = 1分（向下取整）
-        let score = calculate_score(0.15);
-        assert_eq!(score, 1);
-
-        // 0.2秒 = 2分
-        let score = calculate_score(0.2);
-        assert_eq!(score, 2);
-    }
-}
-
-/// ========== 护盾系统测试 ==========
-
-/// 护盾状态
-#[derive(Clone, Copy)]
-pub struct TestShieldState {
-    pub has_shield: bool,
-    pub shield_timer: f32,
-}
-
-/// 更新护盾状态
-pub fn update_shield_test(shield: &mut TestShieldState, delta_secs: f32) -> bool {
-    if shield.has_shield {
-        shield.shield_timer -= delta_secs;
-
-        if shield.shield_timer <= 0.0 {
-            shield.has_shield = false;
-            return false; // 护盾消失
-        }
-        return true; // 护盾仍然有效
-    }
-    false
-}
-
-/// 激活护盾
-pub fn activate_shield_test(shield: &mut TestShieldState, duration: f32) {
-    shield.has_shield = true;
-    shield.shield_timer = duration;
-}
-
-#[cfg(test)]
-mod shield_tests {
-    use super::*;
-
-    #[test]
-    fn test_shield_activation() {
-        let mut shield = TestShieldState {
-            has_shield: false,
-            shield_timer: 0.0,
-        };
-
-        activate_shield_test(&mut shield, 5.0);
-
-        assert!(shield.has_shield);
-        assert!((shield.shield_timer - 5.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_shield_expires() {
-        let mut shield = TestShieldState {
-            has_shield: true,
-            shield_timer: 0.5,
-        };
-
-        let active = update_shield_test(&mut shield, 0.6);
-
-        assert!(!active);
-        assert!(!shield.has_shield);
-    }
-
-    #[test]
-    fn test_shield_remains_active() {
-        let mut shield = TestShieldState {
-            has_shield: true,
-            shield_timer: 5.0,
-        };
-
-        let active = update_shield_test(&mut shield, 1.0);
-
-        assert!(active);
-        assert!(shield.has_shield);
-        assert!((shield.shield_timer - 4.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_shield_blocks_collision() {
-        let shield = TestShieldState {
-            has_shield: true,
-            shield_timer: 3.0,
-        };
-
-        // 有护盾时碰撞应该被阻挡
-        assert!(shield.has_shield);
-    }
-}
-
-/// ========== 道具碰撞测试 ==========
-
-/// 道具碰撞检测
-pub fn check_powerup_collision(
-    player_pos: Vec2,
-    player_half: Vec2,
-    powerup_pos: Vec2,
-    powerup_half: Vec2,
-) -> bool {
-    (player_pos.x - powerup_pos.x).abs() < player_half.x + powerup_half.x
-        && (player_pos.y - powerup_pos.y).abs() < player_half.y + powerup_half.y
-}
-
-#[cfg(test)]
-mod powerup_tests {
-    use super::*;
-
-    #[test]
-    fn test_powerup_collection() {
-        let player_pos = Vec2::new(0.0, 0.0);
-        let player_half = Vec2::new(20.0, 30.0);
-        let powerup_pos = Vec2::new(5.0, 5.0);
-        let powerup_half = Vec2::new(15.0, 15.0);
-
-        assert!(check_powerup_collision(player_pos, player_half, powerup_pos, powerup_half));
-    }
-
-    #[test]
-    fn test_powerup_miss() {
-        let player_pos = Vec2::new(0.0, 0.0);
-        let player_half = Vec2::new(20.0, 30.0);
-        let powerup_pos = Vec2::new(100.0, 100.0);
-        let powerup_half = Vec2::new(15.0, 15.0);
-
-        assert!(!check_powerup_collision(player_pos, player_half, powerup_pos, powerup_half));
-    }
-}
-
-/// ========== 菜单导航测试 ==========
-
-/// 菜单选项数量
-const MENU_OPTION_COUNT: usize = 3;
-
-/// 菜单选择状态
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct MenuSelection(usize);
-
-impl Default for MenuSelection {
-    fn default() -> Self {
-        MenuSelection(0)
-    }
-}
-
-/// 处理菜单上下导航
-fn handle_menu_navigation(current: MenuSelection, direction: i32) -> MenuSelection {
-    let new_idx = if direction < 0 {
-        if current.0 == 0 { MENU_OPTION_COUNT - 1 } else { current.0 - 1 }
-    } else {
-        (current.0 + 1) % MENU_OPTION_COUNT
-    };
-    MenuSelection(new_idx)
-}
-
-/// 根据菜单选择获取目标状态
-fn get_menu_target_state(selection: MenuSelection) -> &'static str {
-    match selection.0 {
-        0 => "Playing",
-        1 => "Settings",
-        2 => "Achievements",
-        _ => "Menu",
-    }
-}
-
-#[cfg(test)]
-mod menu_navigation_tests {
-    use super::*;
-
-    #[test]
-    fn test_menu_initial_selection() {
-        let selection = MenuSelection::default();
-        assert_eq!(selection.0, 0);
-        assert_eq!(get_menu_target_state(selection), "Playing");
-    }
-
-    #[test]
-    fn test_menu_navigate_down() {
-        let selection = MenuSelection(0);
-        let new_selection = handle_menu_navigation(selection, 1);
-        assert_eq!(new_selection.0, 1);
-        assert_eq!(get_menu_target_state(new_selection), "Settings");
-    }
-
-    #[test]
-    fn test_menu_navigate_down_twice() {
-        let selection = MenuSelection(0);
-        let selection = handle_menu_navigation(selection, 1);
-        let selection = handle_menu_navigation(selection, 1);
-        assert_eq!(selection.0, 2);
-        assert_eq!(get_menu_target_state(selection), "Achievements");
-    }
-
-    #[test]
-    fn test_menu_navigate_down_wrap() {
-        let selection = MenuSelection(2);
-        let new_selection = handle_menu_navigation(selection, 1);
-        assert_eq!(new_selection.0, 0); // Wrap to top
-    }
-
-    #[test]
-    fn test_menu_navigate_up() {
-        let selection = MenuSelection(1);
-        let new_selection = handle_menu_navigation(selection, -1);
-        assert_eq!(new_selection.0, 0);
-    }
-
-    #[test]
-    fn test_menu_navigate_up_wrap() {
-        let selection = MenuSelection(0);
-        let new_selection = handle_menu_navigation(selection, -1);
-        assert_eq!(new_selection.0, 2); // Wrap to bottom
-    }
-
-    #[test]
-    fn test_menu_cycle_all_options() {
-        let mut selection = MenuSelection::default();
-
-        // 向下遍历所有选项
-        for i in 0..MENU_OPTION_COUNT {
-            assert_eq!(selection.0, i);
-            selection = handle_menu_navigation(selection, 1);
-        }
-        // 应该回到起点
-        assert_eq!(selection.0, 0);
-
-        // 向上遍历所有选项
-        for i in (0..MENU_OPTION_COUNT).rev() {
-            selection = handle_menu_navigation(selection, -1);
-            assert_eq!(selection.0, i);
-        }
-    }
-}
-
-/// ========== 设置导航测试 ==========
-
-/// 设置选项数量
-const SETTINGS_OPTION_COUNT: usize = 4;
-
-/// 设置选择状态
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct SettingsSelection(usize);
-
-impl Default for SettingsSelection {
-    fn default() -> Self {
-        SettingsSelection(0)
-    }
-}
-
-/// 处理设置上下导航
-fn handle_settings_navigation(current: SettingsSelection, direction: i32) -> SettingsSelection {
-    let new_idx = if direction < 0 {
-        if current.0 == 0 { SETTINGS_OPTION_COUNT - 1 } else { current.0 - 1 }
-    } else {
-        (current.0 + 1) % SETTINGS_OPTION_COUNT
-    };
-    SettingsSelection(new_idx)
-}
-
-#[cfg(test)]
-mod settings_navigation_tests {
-    use super::*;
-
-    #[test]
-    fn test_settings_initial_selection() {
-        let selection = SettingsSelection::default();
-        assert_eq!(selection.0, 0); // Difficulty
-    }
-
-    #[test]
-    fn test_settings_navigate_down() {
-        let selection = SettingsSelection(0);
-        let new_selection = handle_settings_navigation(selection, 1);
-        assert_eq!(new_selection.0, 1); // Master Volume
-    }
-
-    #[test]
-    fn test_settings_navigate_down_wrap() {
-        let selection = SettingsSelection(SETTINGS_OPTION_COUNT - 1);
-        let new_selection = handle_settings_navigation(selection, 1);
-        assert_eq!(new_selection.0, 0); // Wrap to top
-    }
-
-    #[test]
-    fn test_settings_navigate_up_wrap() {
-        let selection = SettingsSelection(0);
-        let new_selection = handle_settings_navigation(selection, -1);
-        assert_eq!(new_selection.0, SETTINGS_OPTION_COUNT - 1); // Wrap to bottom
-    }
-
-    #[test]
-    fn test_settings_all_options_accessible() {
-        let mut selection = SettingsSelection::default();
-        let mut visited = vec![selection.0];
-
-        for _ in 0..SETTINGS_OPTION_COUNT {
-            selection = handle_settings_navigation(selection, 1);
-            visited.push(selection.0);
+        fn create_life_config() -> LifeConfig {
+            LifeConfig::default()
         }
 
-        // 应该能访问所有选项
-        for i in 0..SETTINGS_OPTION_COUNT {
-            assert!(visited.contains(&i), "Option {} should be accessible", i);
+        #[test]
+        fn test_handle_collision_lose_life() {
+            let mut life = create_player_life(3);
+            let config = create_life_config();
+            let result = handle_collision(&mut life, &config);
+            assert!(!result); // not game over, still has lives
+            assert_eq!(life.lives, 2);
+        }
+
+        #[test]
+        fn test_handle_collision_last_life() {
+            let mut life = create_player_life(1);
+            let config = create_life_config();
+            let result = handle_collision(&mut life, &config);
+            assert!(result); // game over
+            assert_eq!(life.lives, 0);
+        }
+
+        #[test]
+        fn test_handle_collision_invincible() {
+            let mut life = create_player_life(3);
+            life.is_invincible = true;
+            let config = create_life_config();
+            let result = handle_collision(&mut life, &config);
+            assert!(!result); // not game over, invincible
+            assert_eq!(life.lives, 3);
+        }
+
+        #[test]
+        fn test_handle_collision_zero_lives() {
+            let mut life = create_player_life(0);
+            let config = create_life_config();
+            let result = handle_collision(&mut life, &config);
+            assert!(result); // game over
+            assert_eq!(life.lives, 0);
         }
     }
-}
 
-/// ========== 连击系统测试 ==========
+    // ========== 难度系统测试 ==========
 
-/// 连击状态
-#[derive(Clone, Copy)]
-pub struct TestComboState {
-    pub count: u32,
-    pub multiplier: f32,
-    pub timer: f32,
-    pub max_timer: f32,
-}
+    mod difficulty_tests {
+        use super::*;
 
-impl Default for TestComboState {
-    fn default() -> Self {
-        Self {
-            count: 0,
-            multiplier: 1.0,
-            timer: 0.0,
-            max_timer: 2.0,
+        #[test]
+        fn test_initial_difficulty() {
+            assert_eq!(calculate_difficulty_level(0.0, 30.0), 1);
+        }
+
+        #[test]
+        fn test_level_2() {
+            assert_eq!(calculate_difficulty_level(30.0, 30.0), 2);
+        }
+
+        #[test]
+        fn test_level_3() {
+            assert_eq!(calculate_difficulty_level(60.0, 30.0), 3);
+        }
+
+        #[test]
+        fn test_speed_multiplier_level_1() {
+            assert!((calculate_speed_multiplier(1) - 1.0).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_speed_multiplier_level_2() {
+            assert!((calculate_speed_multiplier(2) - 1.15).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_speed_multiplier_level_5() {
+            assert!((calculate_speed_multiplier(5) - 1.6).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_spawn_interval_level_1() {
+            assert!((calculate_spawn_interval_multiplier(1) - 1.0).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_spawn_interval_level_2() {
+            assert!((calculate_spawn_interval_multiplier(2) - 0.9).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_spawn_interval_minimum() {
+            assert!((calculate_spawn_interval_multiplier(10) - 0.3).abs() < 0.001);
         }
     }
-}
 
-/// 记录闪避（增加连击）
-pub fn record_dodge(combo: &mut TestComboState) {
-    combo.count += 1;
-    combo.multiplier = 1.0 + (combo.count as f32 * 0.1).min(2.0);
-    combo.timer = combo.max_timer;
-}
+    // ========== 分数系统测试 ==========
 
-/// 更新连击计时器
-/// 返回 true 表示连击仍然有效
-pub fn update_combo_timer(combo: &mut TestComboState, delta_secs: f32) -> bool {
-    if combo.count > 0 {
-        combo.timer -= delta_secs;
-        if combo.timer <= 0.0 {
-            combo.count = 0;
-            combo.multiplier = 1.0;
-            combo.timer = 0.0;
-            return false;
+    mod score_tests {
+        use super::*;
+
+        #[test]
+        fn test_base_score_calculation() {
+            assert_eq!(calculate_base_score(10.0), 100);
         }
-        return true;
-    }
-    false
-}
 
-/// 碰撞重置连击
-pub fn reset_combo_on_collision(combo: &mut TestComboState) {
-    combo.count = 0;
-    combo.multiplier = 1.0;
-    combo.timer = 0.0;
-}
+        #[test]
+        fn test_base_score_zero() {
+            assert_eq!(calculate_base_score(0.0), 0);
+        }
 
-#[cfg(test)]
-mod combo_tests {
-    use super::*;
+        #[test]
+        fn test_score_increment_no_combo_no_double() {
+            let increment = calculate_score_increment(100, 90, 1.0, false);
+            assert_eq!(increment, 10);
+        }
 
-    #[test]
-    fn test_combo_initial_state() {
-        let combo = TestComboState::default();
-        assert_eq!(combo.count, 0);
-        assert!((combo.multiplier - 1.0).abs() < 0.001);
-        assert!((combo.timer).abs() < 0.001);
-    }
+        #[test]
+        fn test_score_increment_with_combo() {
+            let increment = calculate_score_increment(100, 90, 2.0, false);
+            assert_eq!(increment, 20);
+        }
 
-    #[test]
-    fn test_combo_first_dodge() {
-        let mut combo = TestComboState::default();
-        record_dodge(&mut combo);
+        #[test]
+        fn test_score_increment_with_double_score() {
+            let increment = calculate_score_increment(100, 90, 1.0, true);
+            assert_eq!(increment, 20);
+        }
 
-        assert_eq!(combo.count, 1);
-        assert!((combo.multiplier - 1.1).abs() < 0.001); // 1 + 1*0.1
-        assert!((combo.timer - 2.0).abs() < 0.001);
+        #[test]
+        fn test_score_increment_with_combo_and_double() {
+            let increment = calculate_score_increment(100, 90, 2.0, true);
+            assert_eq!(increment, 40);
+        }
     }
 
-    #[test]
-    fn test_combo_multiple_dodges() {
-        let mut combo = TestComboState::default();
+    // ========== 护盾测试 ==========
 
-        for i in 1..=5 {
+    mod shield_tests {
+        use super::*;
+
+        fn create_active_powerups() -> ActivePowerUps {
+            ActivePowerUps {
+                shield_timer: 0.0,
+                has_shield: false,
+                magnet_timer: 0.0,
+                has_magnet: false,
+                slowdown_timer: 0.0,
+                has_slowdown: false,
+                double_score_timer: 0.0,
+                has_double_score: false,
+                shrink_timer: 0.0,
+                has_shrink: false,
+                nitro_timer: 0.0,
+                has_nitro: false,
+            }
+        }
+
+        #[test]
+        fn test_activate_shield() {
+            let mut powerups = create_active_powerups();
+            activate_shield(&mut powerups, 5.0);
+            assert!(powerups.has_shield);
+            assert!((powerups.shield_timer - 5.0).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_shield_timer_update() {
+            let mut powerups = create_active_powerups();
+            activate_shield(&mut powerups, 5.0);
+            let still_active = update_shield_timer(&mut powerups, 1.0);
+            assert!(still_active);
+            assert!((powerups.shield_timer - 4.0).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_shield_expire() {
+            let mut powerups = create_active_powerups();
+            activate_shield(&mut powerups, 1.0);
+            let still_active = update_shield_timer(&mut powerups, 1.5);
+            assert!(!still_active);
+            assert!(!powerups.has_shield);
+        }
+
+        #[test]
+        fn test_no_shield_update() {
+            let mut powerups = create_active_powerups();
+            let still_active = update_shield_timer(&mut powerups, 1.0);
+            assert!(!still_active);
+        }
+    }
+
+    // ========== 道具碰撞测试 ==========
+
+    mod powerup_tests {
+        use super::*;
+
+        #[test]
+        fn test_powerup_collision_detected() {
+            let result = check_powerup_collision(
+                Vec2::new(0.0, 0.0), Vec2::new(25.0, 25.0),
+                Vec2::new(10.0, 10.0), Vec2::new(25.0, 25.0),
+            );
+            assert!(result);
+        }
+
+        #[test]
+        fn test_powerup_no_collision() {
+            let result = check_powerup_collision(
+                Vec2::new(0.0, 0.0), Vec2::new(25.0, 25.0),
+                Vec2::new(100.0, 0.0), Vec2::new(25.0, 25.0),
+            );
+            assert!(!result);
+        }
+    }
+
+    // ========== 菜单导航测试 ==========
+
+    mod menu_navigation_tests {
+        use super::*;
+
+        #[test]
+        fn test_menu_down() {
+            assert_eq!(handle_menu_navigation(0, 1, MENU_OPTION_COUNT), 1);
+        }
+
+        #[test]
+        fn test_menu_up() {
+            assert_eq!(handle_menu_navigation(1, -1, MENU_OPTION_COUNT), 0);
+        }
+
+        #[test]
+        fn test_menu_wrap_down() {
+            assert_eq!(handle_menu_navigation(MENU_OPTION_COUNT - 1, 1, MENU_OPTION_COUNT), 0);
+        }
+
+        #[test]
+        fn test_menu_wrap_up() {
+            assert_eq!(handle_menu_navigation(0, -1, MENU_OPTION_COUNT), MENU_OPTION_COUNT - 1);
+        }
+
+        #[test]
+        fn test_menu_option_count() {
+            assert_eq!(MENU_OPTION_COUNT, 4);
+        }
+    }
+
+    // ========== 设置测试 ==========
+
+    mod settings_tests {
+        use super::*;
+
+        #[test]
+        fn test_difficulty_level_variants() {
+            let easy = DifficultyLevel::Easy;
+            let normal = DifficultyLevel::Normal;
+            let hard = DifficultyLevel::Hard;
+            assert_ne!(easy, normal);
+            assert_ne!(normal, hard);
+            assert_ne!(easy, hard);
+        }
+
+        #[test]
+        fn test_difficulty_speed_multiplier() {
+            assert!((DifficultyLevel::Easy.speed_multiplier() - 0.75).abs() < 0.001);
+            assert!((DifficultyLevel::Normal.speed_multiplier() - 1.0).abs() < 0.001);
+            assert!((DifficultyLevel::Hard.speed_multiplier() - 1.25).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_difficulty_lives() {
+            assert_eq!(DifficultyLevel::Easy.lives(), 5);
+            assert_eq!(DifficultyLevel::Normal.lives(), 3);
+            assert_eq!(DifficultyLevel::Hard.lives(), 2);
+        }
+
+        #[test]
+        fn test_difficulty_spawn_interval() {
+            assert!((DifficultyLevel::Easy.spawn_interval_multiplier() - 1.5).abs() < 0.001);
+            assert!((DifficultyLevel::Normal.spawn_interval_multiplier() - 1.0).abs() < 0.001);
+            assert!((DifficultyLevel::Hard.spawn_interval_multiplier() - 0.75).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_difficulty_from_str() {
+            assert_eq!(DifficultyLevel::from_str("easy"), DifficultyLevel::Easy);
+            assert_eq!(DifficultyLevel::from_str("HARD"), DifficultyLevel::Hard);
+            assert_eq!(DifficultyLevel::from_str("unknown"), DifficultyLevel::Normal);
+        }
+    }
+
+    // ========== 连击系统测试 ==========
+
+    mod combo_tests {
+        use super::*;
+
+        fn create_combo() -> Combo {
+            Combo {
+                count: 0,
+                combo_multiplier: 1.0,
+                timer: 0.0,
+                max_timer: 2.0,
+            }
+        }
+
+        #[test]
+        fn test_record_dodge() {
+            let mut combo = create_combo();
             record_dodge(&mut combo);
-            assert_eq!(combo.count, i);
+            assert_eq!(combo.count, 1);
+            assert!((combo.combo_multiplier - 1.1).abs() < 0.001);
+            assert!((combo.timer - 2.0).abs() < 0.001);
         }
 
-        // 5次闪避后倍率应该是 1 + 5*0.1 = 1.5
-        assert!((combo.multiplier - 1.5).abs() < 0.001);
-    }
+        #[test]
+        fn test_record_multiple_dodges() {
+            let mut combo = create_combo();
+            for _ in 0..5 {
+                record_dodge(&mut combo);
+            }
+            assert_eq!(combo.count, 5);
+            assert!((combo.combo_multiplier - 1.5).abs() < 0.001);
+        }
 
-    #[test]
-    fn test_combo_max_multiplier() {
-        let mut combo = TestComboState::default();
+        #[test]
+        fn test_combo_multiplier_max() {
+            let mut combo = create_combo();
+            for _ in 0..25 {
+                record_dodge(&mut combo);
+            }
+            assert!((combo.combo_multiplier - 3.0).abs() < 0.001);
+        }
 
-        // 进行大量闪避，测试倍率上限
-        for _ in 0..30 {
+        #[test]
+        fn test_reset_combo_on_collision() {
+            let mut combo = create_combo();
             record_dodge(&mut combo);
-        }
-
-        // 倍率上限是 3.0 (1.0 + 2.0)
-        assert!((combo.multiplier - 3.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_combo_timer_expiry() {
-        let mut combo = TestComboState::default();
-        record_dodge(&mut combo);
-
-        // 经过2.1秒，连击应该过期
-        let active = update_combo_timer(&mut combo, 2.1);
-
-        assert!(!active);
-        assert_eq!(combo.count, 0);
-        assert!((combo.multiplier - 1.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_combo_timer_still_active() {
-        let mut combo = TestComboState::default();
-        record_dodge(&mut combo);
-
-        // 经过1秒，连击仍然有效
-        let active = update_combo_timer(&mut combo, 1.0);
-
-        assert!(active);
-        assert_eq!(combo.count, 1);
-        assert!((combo.timer - 1.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_combo_reset_on_collision() {
-        let mut combo = TestComboState::default();
-
-        // 建立连击
-        for _ in 0..5 {
             record_dodge(&mut combo);
+            assert_eq!(combo.count, 2);
+            reset_combo_on_collision(&mut combo);
+            assert_eq!(combo.count, 0);
+            assert!((combo.combo_multiplier - 1.0).abs() < 0.001);
+            assert!((combo.timer - 0.0).abs() < 0.001);
         }
-        assert_eq!(combo.count, 5);
 
-        // 碰撞重置
-        reset_combo_on_collision(&mut combo);
+        #[test]
+        fn test_update_combo_timer() {
+            let mut combo = create_combo();
+            record_dodge(&mut combo);
+            let still_active = update_combo_timer(&mut combo, 1.0);
+            assert!(still_active);
+            assert!((combo.timer - 1.0).abs() < 0.001);
+        }
 
-        assert_eq!(combo.count, 0);
-        assert!((combo.multiplier - 1.0).abs() < 0.001);
-        assert!((combo.timer).abs() < 0.001);
+        #[test]
+        fn test_combo_timer_expire() {
+            let mut combo = create_combo();
+            record_dodge(&mut combo);
+            let still_active = update_combo_timer(&mut combo, 3.0);
+            assert!(!still_active);
+            assert_eq!(combo.count, 0);
+            assert!((combo.combo_multiplier - 1.0).abs() < 0.001);
+        }
+
+        #[test]
+        fn test_combo_timer_no_combo() {
+            let mut combo = create_combo();
+            let still_active = update_combo_timer(&mut combo, 1.0);
+            assert!(!still_active);
+        }
     }
 
-    #[test]
-    fn test_combo_refresh_timer_on_dodge() {
-        let mut combo = TestComboState::default();
-        record_dodge(&mut combo);
+    // ========== 双倍分数回归测试 ==========
 
-        // 经过1秒
-        update_combo_timer(&mut combo, 1.0);
-        assert!((combo.timer - 1.0).abs() < 0.001);
+    mod double_score_tests {
+        use super::*;
 
-        // 再次闪避，计时器应该刷新
-        record_dodge(&mut combo);
-        assert!((combo.timer - 2.0).abs() < 0.001);
-        assert_eq!(combo.count, 2);
-    }
-}
+        #[test]
+        fn test_double_score_with_combo_multiplier() {
+            // 连击倍率1.5 + 双倍分数 = 3.0x
+            let increment = calculate_score_increment(100, 90, 1.5, true);
+            assert_eq!(increment, 30);
+        }
 
-/// ========== 游戏模式测试 ==========
+        #[test]
+        fn test_collision_resets_combo_not_double_score() {
+            // 碰撞重置 combo_multiplier 到 1.0，但 DoubleScore 是独立的
+            let mut combo = Combo {
+                count: 5,
+                combo_multiplier: 1.5,
+                timer: 1.0,
+                max_timer: 2.0,
+            };
+            reset_combo_on_collision(&mut combo);
+            assert!((combo.combo_multiplier - 1.0).abs() < 0.001);
 
-/// 游戏模式枚举
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TestGameMode {
-    Classic,
-    Endless,
-    TimeAttack,
-}
+            // DoubleScore 仍然生效（通过 has_double_score 标记）
+            let increment = calculate_score_increment(100, 90, combo.combo_multiplier, true);
+            assert_eq!(increment, 20); // 10 * 1.0 * 2.0
+        }
 
-impl Default for TestGameMode {
-    fn default() -> Self {
-        TestGameMode::Classic
-    }
-}
+        #[test]
+        fn test_double_score_expiry_no_halving_bug() {
+            // DoubleScore 过期后，combo_multiplier 不会被除以2
+            let combo = Combo {
+                count: 3,
+                combo_multiplier: 1.3,
+                timer: 1.0,
+                max_timer: 2.0,
+            };
+            // 模拟 DoubleScore 过期：只是 has_double_score 变为 false
+            // combo_multiplier 不受影响
+            let increment_before = calculate_score_increment(100, 90, combo.combo_multiplier, true);
+            let increment_after = calculate_score_increment(100, 90, combo.combo_multiplier, false);
+            assert_eq!(increment_before, 26); // 10 * 1.3 * 2.0
+            assert_eq!(increment_after, 13);  // 10 * 1.3 * 1.0
+            // combo_multiplier 始终 >= 1.0，不会出现 0.5 的 Bug
+            assert!(combo.combo_multiplier >= 1.0);
+        }
 
-/// 切换游戏模式
-fn cycle_game_mode(mode: TestGameMode, direction: i32) -> TestGameMode {
-    match mode {
-        TestGameMode::Classic => if direction > 0 { TestGameMode::Endless } else { TestGameMode::TimeAttack },
-        TestGameMode::Endless => if direction > 0 { TestGameMode::TimeAttack } else { TestGameMode::Classic },
-        TestGameMode::TimeAttack => if direction > 0 { TestGameMode::Classic } else { TestGameMode::Endless },
-    }
-}
+        #[test]
+        fn test_combo_timeout_with_double_score_no_bug() {
+            // 连击超时重置 combo_multiplier 到 1.0，DoubleScore 独立
+            let mut combo = Combo {
+                count: 5,
+                combo_multiplier: 1.5,
+                timer: 0.1,
+                max_timer: 2.0,
+            };
+            update_combo_timer(&mut combo, 1.0);
+            assert!((combo.combo_multiplier - 1.0).abs() < 0.001);
 
-/// 获取模式生命值
-fn get_mode_lives(mode: TestGameMode) -> u32 {
-    match mode {
-        TestGameMode::Classic => 3,
-        TestGameMode::Endless => 1,
-        TestGameMode::TimeAttack => 3,
-    }
-}
+            // DoubleScore 仍然正常工作
+            let increment = calculate_score_increment(100, 90, combo.combo_multiplier, true);
+            assert_eq!(increment, 20); // 10 * 1.0 * 2.0
+        }
 
-/// 获取模式时间限制
-fn get_mode_time_limit(mode: TestGameMode) -> Option<f32> {
-    match mode {
-        TestGameMode::TimeAttack => Some(60.0),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-mod game_mode_tests {
-    use super::*;
-
-    #[test]
-    fn test_default_mode() {
-        let mode = TestGameMode::default();
-        assert_eq!(mode, TestGameMode::Classic);
-    }
-
-    #[test]
-    fn test_cycle_mode_forward() {
-        let mode = TestGameMode::Classic;
-        assert_eq!(cycle_game_mode(mode, 1), TestGameMode::Endless);
-        assert_eq!(cycle_game_mode(TestGameMode::Endless, 1), TestGameMode::TimeAttack);
-        assert_eq!(cycle_game_mode(TestGameMode::TimeAttack, 1), TestGameMode::Classic);
-    }
-
-    #[test]
-    fn test_cycle_mode_backward() {
-        let mode = TestGameMode::Classic;
-        assert_eq!(cycle_game_mode(mode, -1), TestGameMode::TimeAttack);
-        assert_eq!(cycle_game_mode(TestGameMode::Endless, -1), TestGameMode::Classic);
-        assert_eq!(cycle_game_mode(TestGameMode::TimeAttack, -1), TestGameMode::Endless);
+        #[test]
+        fn test_no_multiplier_below_one() {
+            // 确保 combo_multiplier 永远不会低于 1.0
+            let mut combo = Combo {
+                count: 0,
+                combo_multiplier: 1.0,
+                timer: 0.0,
+                max_timer: 2.0,
+            };
+            reset_combo_on_collision(&mut combo);
+            assert!(combo.combo_multiplier >= 1.0);
+            update_combo_timer(&mut combo, 5.0);
+            assert!(combo.combo_multiplier >= 1.0);
+        }
     }
 
-    #[test]
-    fn test_mode_lives() {
-        assert_eq!(get_mode_lives(TestGameMode::Classic), 3);
-        assert_eq!(get_mode_lives(TestGameMode::Endless), 1);
-        assert_eq!(get_mode_lives(TestGameMode::TimeAttack), 3);
+    // ========== 游戏模式测试 ==========
+
+    mod game_mode_tests {
+        use super::*;
+
+        #[test]
+        fn test_cycle_game_mode_forward() {
+            assert_eq!(cycle_game_mode(GameMode::Classic, 1), GameMode::Endless);
+            assert_eq!(cycle_game_mode(GameMode::Endless, 1), GameMode::TimeAttack);
+            assert_eq!(cycle_game_mode(GameMode::TimeAttack, 1), GameMode::Classic);
+        }
+
+        #[test]
+        fn test_cycle_game_mode_backward() {
+            assert_eq!(cycle_game_mode(GameMode::Classic, -1), GameMode::TimeAttack);
+            assert_eq!(cycle_game_mode(GameMode::Endless, -1), GameMode::Classic);
+            assert_eq!(cycle_game_mode(GameMode::TimeAttack, -1), GameMode::Endless);
+        }
+
+        #[test]
+        fn test_get_mode_lives() {
+            assert_eq!(get_mode_lives(GameMode::Classic, 3), 3);
+            assert_eq!(get_mode_lives(GameMode::Endless, 3), 1);
+            assert_eq!(get_mode_lives(GameMode::TimeAttack, 3), 3);
+        }
+
+        #[test]
+        fn test_get_mode_time_limit() {
+            assert_eq!(get_mode_time_limit(GameMode::Classic), None);
+            assert_eq!(get_mode_time_limit(GameMode::Endless), None);
+            assert_eq!(get_mode_time_limit(GameMode::TimeAttack), Some(60.0));
+        }
     }
 
-    #[test]
-    fn test_mode_time_limit() {
-        assert_eq!(get_mode_time_limit(TestGameMode::Classic), None);
-        assert_eq!(get_mode_time_limit(TestGameMode::Endless), None);
-        assert_eq!(get_mode_time_limit(TestGameMode::TimeAttack), Some(60.0));
+    // ========== 游戏状态测试 ==========
+
+    mod game_state_tests {
+        use super::*;
+
+        #[test]
+        fn test_game_state_variants() {
+            let states = vec![GameState::Menu, GameState::Playing, GameState::Paused, GameState::GameOver];
+            assert_eq!(states.len(), 4);
+        }
+
+        #[test]
+        fn test_game_state_equality() {
+            assert_eq!(GameState::Menu, GameState::Menu);
+            assert_ne!(GameState::Menu, GameState::Playing);
+        }
     }
 
-    #[test]
-    fn test_cycle_all_modes() {
-        let mut mode = TestGameMode::default();
+    // ========== Bevy 集成测试 ==========
 
-        // 向前遍历: Classic -> Endless -> TimeAttack -> Classic
-        mode = cycle_game_mode(mode, 1);
-        assert_eq!(mode, TestGameMode::Endless);
-        mode = cycle_game_mode(mode, 1);
-        assert_eq!(mode, TestGameMode::TimeAttack);
-        mode = cycle_game_mode(mode, 1);
-        assert_eq!(mode, TestGameMode::Classic);
+    mod bevy_integration_tests {
+        use bevy::prelude::*;
+        use super::Combo;
 
-        // 向后遍历: Classic -> TimeAttack -> Endless -> Classic
-        mode = cycle_game_mode(mode, -1);
-        assert_eq!(mode, TestGameMode::TimeAttack);
-        mode = cycle_game_mode(mode, -1);
-        assert_eq!(mode, TestGameMode::Endless);
-        mode = cycle_game_mode(mode, -1);
-        assert_eq!(mode, TestGameMode::Classic);
+        #[test]
+        fn test_app_initialization() {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            app.update();
+        }
+
+        #[test]
+        fn test_resource_insertion() {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            app.insert_resource(Combo {
+                count: 0,
+                combo_multiplier: 1.0,
+                timer: 0.0,
+                max_timer: 2.0,
+            });
+            app.update();
+            let combo = app.world().resource::<Combo>();
+            assert_eq!(combo.count, 0);
+            assert!((combo.combo_multiplier - 1.0).abs() < 0.001);
+        }
     }
 }

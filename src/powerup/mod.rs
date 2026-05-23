@@ -12,7 +12,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::game::{GameState, GameEntity, Difficulty, Combo};
+use crate::game::{GameState, GameEntity, Difficulty};
 use crate::player::Player;
 
 /// 道具插件
@@ -31,6 +31,36 @@ impl Plugin for PowerUpPlugin {
                 update_active_powerups,
             ).run_if(in_state(GameState::Playing)));
     }
+}
+
+/// 道具碰撞检测
+pub fn check_powerup_collision(
+    player_pos: Vec2,
+    player_half: Vec2,
+    powerup_pos: Vec2,
+    powerup_half: Vec2,
+) -> bool {
+    (player_pos.x - powerup_pos.x).abs() < player_half.x + powerup_half.x
+        && (player_pos.y - powerup_pos.y).abs() < player_half.y + powerup_half.y
+}
+
+/// 更新护盾计时器，返回护盾是否仍然有效
+pub fn update_shield_timer(active_powerups: &mut ActivePowerUps, delta_secs: f32) -> bool {
+    if active_powerups.has_shield {
+        active_powerups.shield_timer -= delta_secs;
+        if active_powerups.shield_timer <= 0.0 {
+            active_powerups.has_shield = false;
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
+/// 激活护盾
+pub fn activate_shield(active_powerups: &mut ActivePowerUps, duration: f32) {
+    active_powerups.has_shield = true;
+    active_powerups.shield_timer = duration;
 }
 
 /// 道具配置
@@ -240,7 +270,6 @@ fn move_powerups(
 fn collect_powerups(
     mut commands: Commands,
     mut active_powerups: ResMut<ActivePowerUps>,
-    mut combo: ResMut<Combo>,
     player_query: Query<&Transform, With<Player>>,
     powerup_query: Query<(Entity, &Transform, &PowerUpType), With<PowerUp>>,
     config: Res<PowerUpConfig>,
@@ -289,8 +318,6 @@ fn collect_powerups(
                 PowerUpType::DoubleScore => {
                     active_powerups.has_double_score = true;
                     active_powerups.double_score_timer = config.double_score_duration;
-                    // 立即应用双倍分数到连击倍率
-                    combo.multiplier *= 2.0;
                 }
                 PowerUpType::Shrink => {
                     active_powerups.has_shrink = true;
@@ -311,7 +338,6 @@ fn collect_powerups(
 fn update_active_powerups(
     mut commands: Commands,
     mut active_powerups: ResMut<ActivePowerUps>,
-    mut combo: ResMut<Combo>,
     player_query: Query<&Transform, (With<Player>, Without<ShieldVisual>)>,
     mut shield_query: Query<(Entity, &mut Transform, &mut Sprite), (With<ShieldVisual>, Without<Player>)>,
     time: Res<Time>,
@@ -413,8 +439,6 @@ fn update_active_powerups(
         active_powerups.double_score_timer -= time.delta_secs();
         if active_powerups.double_score_timer <= 0.0 {
             active_powerups.has_double_score = false;
-            // 移除双倍分数效果
-            combo.multiplier /= 2.0;
         }
     }
 

@@ -21,7 +21,7 @@ impl Plugin for SettingsPlugin {
 }
 
 /// 难度级别
-#[derive(Resource, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum DifficultyLevel {
     Easy,
     #[default]

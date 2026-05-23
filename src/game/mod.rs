@@ -122,8 +122,8 @@ impl Plugin for GamePlugin {
 pub struct Combo {
     /// 连击计数
     pub count: u32,
-    /// 分数倍率
-    pub multiplier: f32,
+    /// 分数倍率（仅由连击驱动）
+    pub combo_multiplier: f32,
     /// 连击计时器
     pub timer: f32,
     /// 连击最大时间
@@ -134,7 +134,7 @@ impl Default for Combo {
     fn default() -> Self {
         Self {
             count: 0,
-            multiplier: 1.0,
+            combo_multiplier: 1.0,
             timer: 0.0,
             max_timer: 2.0,
         }
@@ -165,7 +165,63 @@ fn setup_camera(mut commands: Commands) {
 }
 
 /// 菜单选项数量
-const MENU_OPTION_COUNT: usize = 4;
+pub const MENU_OPTION_COUNT: usize = 4;
+
+/// 处理菜单上下导航
+pub fn handle_menu_navigation(current: usize, direction: i32, option_count: usize) -> usize {
+    if direction < 0 {
+        if current == 0 { option_count - 1 } else { current - 1 }
+    } else {
+        (current + 1) % option_count
+    }
+}
+
+/// 更新连击计时器，返回是否仍然有效
+pub fn update_combo_timer(combo: &mut Combo, delta_secs: f32) -> bool {
+    if combo.count > 0 {
+        combo.timer -= delta_secs;
+        if combo.timer <= 0.0 {
+            combo.count = 0;
+            combo.combo_multiplier = 1.0;
+            combo.timer = 0.0;
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
+/// 计算难度等级
+pub fn calculate_difficulty_level(elapsed_time: f32, interval: f32) -> u32 {
+    (elapsed_time / interval) as u32 + 1
+}
+
+/// 计算速度倍率
+pub fn calculate_speed_multiplier(level: u32) -> f32 {
+    1.0 + (level - 1) as f32 * 0.15
+}
+
+/// 计算生成间隔倍率
+pub fn calculate_spawn_interval_multiplier(level: u32) -> f32 {
+    (1.0 - (level - 1) as f32 * 0.10).max(0.3)
+}
+
+/// 计算基础分数
+pub fn calculate_base_score(elapsed_time: f32) -> u32 {
+    (elapsed_time * 10.0) as u32
+}
+
+/// 计算分数增量（含连击倍率和双倍分数）
+pub fn calculate_score_increment(
+    base_score: u32,
+    current_score: u32,
+    combo_multiplier: f32,
+    has_double_score: bool,
+) -> u32 {
+    let double_score_factor = if has_double_score { 2.0 } else { 1.0 };
+    let increment = (base_score - current_score) as f32 * combo_multiplier * double_score_factor;
+    increment as u32
+}
 
 /// 当前选中的菜单选项
 #[derive(Resource, Default)]
@@ -316,7 +372,7 @@ fn setup_game(
 
     // 重置连击
     combo.count = 0;
-    combo.multiplier = 1.0;
+    combo.combo_multiplier = 1.0;
     combo.timer = 0.0;
 
     // 根据游戏模式设置生命值
@@ -534,10 +590,10 @@ fn menu_system(
 ) {
     // 上下选择
     if keyboard.just_pressed(KeyCode::ArrowUp) {
-        selection.0 = if selection.0 == 0 { MENU_OPTION_COUNT - 1 } else { selection.0 - 1 };
+        selection.0 = handle_menu_navigation(selection.0, -1, MENU_OPTION_COUNT);
     }
     if keyboard.just_pressed(KeyCode::ArrowDown) {
-        selection.0 = (selection.0 + 1) % MENU_OPTION_COUNT;
+        selection.0 = handle_menu_navigation(selection.0, 1, MENU_OPTION_COUNT);
     }
 
     // 左右切换游戏模式
@@ -612,16 +668,20 @@ fn update_score(
     mut score: ResMut<Score>,
     mut game_timer: ResMut<GameTimer>,
     combo: Res<Combo>,
+    active_powerups: Res<crate::powerup::ActivePowerUps>,
     time: Res<Time>,
     mut query: Query<&mut Text, With<ScoreText>>,
 ) {
     game_timer.elapsed += time.delta_secs();
 
-    // 每0.1秒加1分，应用连击倍率
-    let base_score = (game_timer.elapsed * 10.0) as u32;
+    let base_score = calculate_base_score(game_timer.elapsed);
     if base_score != score.value {
-        let increment = (base_score - score.value) as f32 * combo.multiplier;
-        score.value += increment as u32;
+        score.value += calculate_score_increment(
+            base_score,
+            score.value,
+            combo.combo_multiplier,
+            active_powerups.has_double_score,
+        );
 
         // 更新UI
         if let Ok(mut text) = query.single_mut() {
@@ -641,7 +701,7 @@ fn update_combo(
         if combo.timer <= 0.0 {
             // 连击超时，重置
             combo.count = 0;
-            combo.multiplier = 1.0;
+            combo.combo_multiplier = 1.0;
             combo.timer = 0.0;
 
             // 清空连击显示

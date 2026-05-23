@@ -133,6 +133,32 @@ pub fn get_mode_name(mode: GameMode) -> &'static str {
     }
 }
 
+/// 切换游戏模式
+pub fn cycle_game_mode(mode: GameMode, direction: i32) -> GameMode {
+    match mode {
+        GameMode::Classic => if direction > 0 { GameMode::Endless } else { GameMode::TimeAttack },
+        GameMode::Endless => if direction > 0 { GameMode::TimeAttack } else { GameMode::Classic },
+        GameMode::TimeAttack => if direction > 0 { GameMode::Classic } else { GameMode::Endless },
+    }
+}
+
+/// 获取模式生命值
+pub fn get_mode_lives(mode: GameMode, difficulty_lives: u32) -> u32 {
+    match mode {
+        GameMode::Classic => difficulty_lives,
+        GameMode::Endless => 1,
+        GameMode::TimeAttack => difficulty_lives,
+    }
+}
+
+/// 获取模式时间限制
+pub fn get_mode_time_limit(mode: GameMode) -> Option<f32> {
+    match mode {
+        GameMode::TimeAttack => Some(60.0),
+        _ => None,
+    }
+}
+
 /// 获取模式描述
 pub fn get_mode_description(mode: GameMode) -> &'static str {
     match mode {

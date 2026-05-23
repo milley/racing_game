@@ -27,8 +27,7 @@ pub struct ObstacleHitbox {
 
 /// AABB 碰撞检测
 /// 检测两个矩形是否碰撞
-#[inline]
-fn check_aabb_collision(
+pub fn check_aabb_collision(
     pos_a: Vec2,
     half_size_a: Vec2,
     pos_b: Vec2,
@@ -58,6 +57,25 @@ impl Plugin for ObstaclePlugin {
                     .run_if(in_state(GameState::Playing)),
             );
     }
+}
+
+/// 判断障碍物是否应该被移除
+pub fn should_despawn_obstacle(y_position: f32, screen_bottom: f32) -> bool {
+    y_position < screen_bottom
+}
+
+/// 记录闪避（增加连击）
+pub fn record_dodge(combo: &mut Combo) {
+    combo.count += 1;
+    combo.combo_multiplier = 1.0 + (combo.count as f32 * 0.1).min(2.0);
+    combo.timer = combo.max_timer;
+}
+
+/// 碰撞重置连击
+pub fn reset_combo_on_collision(combo: &mut Combo) {
+    combo.count = 0;
+    combo.combo_multiplier = 1.0;
+    combo.timer = 0.0;
 }
 
 /// 障碍物配置
@@ -168,9 +186,7 @@ fn move_obstacles(
             commands.entity(entity).insert(Dodged);
 
             // 增加连击
-            combo.count += 1;
-            combo.multiplier = 1.0 + (combo.count as f32 * 0.1).min(2.0); // 最大3.0倍
-            combo.timer = combo.max_timer;
+            record_dodge(&mut combo);
         }
 
         // 移出屏幕后删除
@@ -230,9 +246,7 @@ fn check_collisions(
             commands.entity(obstacle_entity).despawn();
 
             // 重置连击
-            combo.count = 0;
-            combo.multiplier = 1.0;
-            combo.timer = 0.0;
+            reset_combo_on_collision(&mut combo);
 
             // 处理生命
             if handle_collision(&mut player_life, &life_config) {

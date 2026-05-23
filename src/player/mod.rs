@@ -1,30 +1,13 @@
 use bevy::prelude::*;
+use crate::game::{GameState, GameEntity, Difficulty};
 
-use crate::{GameConfig, game::{GameEntity, GameState}};
-use crate::powerup::ActivePowerUps;
-
-/// 玩家插件
-pub struct PlayerPlugin;
-
-impl Plugin for PlayerPlugin {
-    fn build(&self, app: &mut App) {
-        app
-            // 注册玩家资源
-            .init_resource::<PlayerConfig>()
-            // 添加系统
-            .add_systems(OnEnter(GameState::Playing), spawn_player)
-            .add_systems(
-                Update,
-                player_movement.run_if(in_state(GameState::Playing)),
-            );
-    }
-}
+/// 玩家实体标记
+#[derive(Component)]
+pub struct Player;
 
 /// 玩家配置
 #[derive(Resource)]
 pub struct PlayerConfig {
-    /// 移动速度
-    pub speed: f32,
     /// 玩家宽度
     pub width: f32,
     /// 玩家高度
@@ -34,77 +17,68 @@ pub struct PlayerConfig {
 impl Default for PlayerConfig {
     fn default() -> Self {
         Self {
-            speed: 300.0,
             width: 40.0,
             height: 60.0,
         }
     }
 }
 
-/// 玩家实体标记
-#[derive(Component)]
-pub struct Player;
+/// 玩家宽度（用于 clamp_player_position 的默认值）
+const PLAYER_WIDTH: f32 = 40.0;
 
-/// 玩家位置（用于碰撞检测）
-#[derive(Component)]
-struct PlayerPosition(Vec2);
+/// 道路宽度
+const ROAD_WIDTH: f32 = 400.0;
 
-/// 生成玩家
-fn spawn_player(
-    mut commands: Commands,
-    _config: Res<PlayerConfig>,
-    _game_config: Res<GameConfig>,
+/// 限制玩家位置在道路范围内
+pub fn clamp_player_position(x: f32, road_width: f32, player_width: f32) -> f32 {
+    let half_road = road_width / 2.0;
+    let half_player = player_width / 2.0;
+    x.clamp(-half_road + half_player, half_road - half_player)
+}
+
+/// 玩家移动
+pub fn player_movement(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut Transform, With<Player>>,
+    time: Res<Time>,
+    difficulty: Res<Difficulty>,
 ) {
-    let start_x = 0.0;
-    let start_y = -220.0;
+    for mut transform in &mut query {
+        let direction = if keyboard.pressed(KeyCode::ArrowLeft) {
+            -1.0
+        } else if keyboard.pressed(KeyCode::ArrowRight) {
+            1.0
+        } else {
+            continue;
+        };
 
-    // 玩家实体（由像素图形系统处理显示，不需要 Sprite）
+        let speed = 300.0 * difficulty.speed_multiplier;
+        let new_x = transform.translation.x + direction * speed * time.delta_secs();
+        transform.translation.x = clamp_player_position(new_x, ROAD_WIDTH, PLAYER_WIDTH);
+    }
+}
+
+/// 创建玩家
+pub fn spawn_player(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+) {
     commands.spawn((
-        Transform::from_xyz(start_x, start_y, 1.0),
-        Visibility::default(),
+        Sprite::from_image(asset_server.load("player.png")),
+        Transform::from_xyz(0.0, -200.0, 1.0),
         Player,
-        PlayerPosition(Vec2::new(start_x, start_y)),
         GameEntity,
     ));
 }
 
-/// 玩家移动
-fn player_movement(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    config: Res<PlayerConfig>,
-    game_config: Res<GameConfig>,
-    mut query: Query<(&mut Transform, &mut PlayerPosition), With<Player>>,
-    time: Res<Time>,
-    active_powerups: Res<ActivePowerUps>,
-) {
-    let Ok((mut transform, mut position)) = query.single_mut() else {
-        return;
-    };
+/// 玩家插件
+pub struct PlayerPlugin;
 
-    let mut speed = config.speed;
-
-    // 应用氮气加速
-    if active_powerups.has_nitro {
-        speed *= 1.5; // 速度提升50%
+impl Plugin for PlayerPlugin {
+    fn build(&self, app: &mut App) {
+        app
+            .init_resource::<PlayerConfig>()
+            .add_systems(OnEnter(GameState::Playing), spawn_player)
+            .add_systems(Update, player_movement.run_if(in_state(GameState::Playing)));
     }
-
-    let delta = speed * time.delta_secs();
-
-    // 计算道路边界
-    let half_road = game_config.road_width / 2.0 - config.width / 2.0;
-
-    // 移动逻辑
-    let mut direction = 0.0;
-    if keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::KeyA) {
-        direction -= 1.0;
-    }
-    if keyboard.pressed(KeyCode::ArrowRight) || keyboard.pressed(KeyCode::KeyD) {
-        direction += 1.0;
-    }
-
-    // 更新位置
-    position.0.x += direction * delta;
-    position.0.x = position.0.x.clamp(-half_road, half_road);
-
-    transform.translation.x = position.0.x;
 }

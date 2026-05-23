@@ -183,7 +183,7 @@ fn spawn_road(mut commands: Commands, game_config: Res<GameConfig>, road_config:
 /// y_pos: 当前Y位置
 /// curvature: 曲率值 (-1 到 1)
 /// 返回X偏移量
-fn calculate_curve_offset(y_pos: f32, curvature: f32) -> f32 {
+pub fn calculate_curve_offset(y_pos: f32, curvature: f32) -> f32 {
     // 透视因子：远处(y大)偏移大，近处(y小)偏移小
     // y范围: -400(近) 到 400(远)
     let y_normalized = (y_pos + 400.0) / 800.0; // 0 到 1
@@ -191,6 +191,23 @@ fn calculate_curve_offset(y_pos: f32, curvature: f32) -> f32 {
 
     // 弯道偏移：远处偏移大
     curvature * perspective * 100.0
+}
+
+/// 道路标线循环滚动逻辑
+pub fn calculate_road_line_offset(
+    current_offset: f32,
+    scroll_speed: f32,
+    delta_secs: f32,
+    total_height: f32,
+    loop_threshold: f32,
+    loop_reset_amount: f32,
+) -> f32 {
+    let new_offset = current_offset - scroll_speed * delta_secs;
+    if new_offset < loop_threshold {
+        new_offset + loop_reset_amount
+    } else {
+        new_offset
+    }
 }
 
 /// 更新道路标线（滚动 + 弯道效果）
