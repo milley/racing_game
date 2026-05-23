@@ -4,9 +4,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::GameState;
-
-/// 生命插件
+use crate::game::GameState;/// 生命插件
 pub struct LifePlugin;
 
 impl Plugin for LifePlugin {
@@ -14,7 +12,7 @@ impl Plugin for LifePlugin {
         app
             .init_resource::<LifeConfig>()
             .init_resource::<PlayerLife>()
-            .add_systems(OnEnter(GameState::Playing), (reset_life, spawn_life_ui))
+            .add_systems(OnEnter(GameState::Playing), reset_life)
             .add_systems(Update, (
                 update_invincibility,
                 update_life_display,
@@ -68,9 +66,9 @@ fn reset_life(mut player_life: ResMut<PlayerLife>, config: Res<LifeConfig>) {
     player_life.invincibility_timer = 0.0;
 }
 
-/// 生成生命UI
-fn spawn_life_ui(mut commands: Commands) {
-    commands.spawn((
+/// 生成生命UI（由 game 模块的 HUD 容器调用）
+pub fn spawn_life_ui(parent: &mut bevy::ecs::hierarchy::ChildSpawnerCommands) {
+    parent.spawn((
         Text::new("Lives: 3"),
         TextFont {
             font_size: 20.0,
@@ -78,9 +76,7 @@ fn spawn_life_ui(mut commands: Commands) {
         },
         TextColor(Color::srgb(1.0, 0.3, 0.3)),
         Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(40.0),
-            left: Val::Px(10.0),
+            margin: UiRect::px(10.0, 10.0, 0.0, 0.0),
             ..default()
         },
         LifeUI,

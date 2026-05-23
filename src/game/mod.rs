@@ -22,6 +22,7 @@ pub enum GameState {
     Menu,
     Settings,
     Achievements,
+    Help,
     Playing,
     Paused,
     GameOver,
@@ -105,6 +106,9 @@ impl Plugin for GamePlugin {
             .add_systems(OnExit(GameState::Paused), cleanup_pause_menu)
             .add_systems(OnEnter(GameState::GameOver), setup_game_over)
             .add_systems(OnExit(GameState::GameOver), (cleanup_game_over, crate::save::save_game_data))
+            .add_systems(OnEnter(GameState::Help), setup_help)
+            .add_systems(OnExit(GameState::Help), cleanup_help)
+            .add_systems(Update, help_system.run_if(in_state(GameState::Help)))
             .add_systems(Update, (
                 menu_system.run_if(in_state(GameState::Menu)),
                 pause_system.run_if(in_state(GameState::Playing)),
@@ -165,7 +169,7 @@ fn setup_camera(mut commands: Commands) {
 }
 
 /// 菜单选项数量
-pub const MENU_OPTION_COUNT: usize = 4;
+pub const MENU_OPTION_COUNT: usize = 5;
 
 /// 处理菜单上下导航
 pub fn handle_menu_navigation(current: usize, direction: i32, option_count: usize) -> usize {
@@ -232,6 +236,7 @@ struct MenuSelection(usize);
 enum MenuOption {
     Start,
     GameMode,
+    HowToPlay,
     Settings,
     Achievements,
 }
@@ -329,10 +334,25 @@ fn setup_menu(
                 },
                 TextColor(Color::srgb(0.7, 0.7, 0.7)),
                 Node {
-                    margin: UiRect::bottom(Val::Px(30.0)),
+                    margin: UiRect::bottom(Val::Px(10.0)),
                     ..default()
                 },
                 MenuOption::Achievements,
+            ));
+
+            // 玩法介绍
+            parent.spawn((
+                Text::new("  How to Play  "),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                Node {
+                    margin: UiRect::bottom(Val::Px(30.0)),
+                    ..default()
+                },
+                MenuOption::HowToPlay,
             ));
 
             // 操作说明
@@ -452,6 +472,9 @@ fn setup_game(
                     TimerText,
                 ));
             }
+
+            // 生命显示
+            crate::life::spawn_life_ui(parent);
         });
 }
 
@@ -613,6 +636,7 @@ fn menu_system(
             1 => {}, // GameMode - handled by left/right
             2 => next_state.set(GameState::Settings),
             3 => next_state.set(GameState::Achievements),
+            4 => next_state.set(GameState::Help),
             _ => {}
         }
     }
@@ -624,6 +648,7 @@ fn menu_system(
             MenuOption::GameMode => 1,
             MenuOption::Settings => 2,
             MenuOption::Achievements => 3,
+            MenuOption::HowToPlay => 4,
         };
 
         let is_selected = idx == selection.0;
@@ -634,6 +659,7 @@ fn menu_system(
             MenuOption::GameMode => format!("Mode: {}", crate::game_mode::get_mode_name(current_mode.mode)),
             MenuOption::Settings => "Settings".to_string(),
             MenuOption::Achievements => "Achievements".to_string(),
+            MenuOption::HowToPlay => "How to Play".to_string(),
         };
         **text = if is_selected {
             format!("> {} <", base_text)
@@ -841,6 +867,10 @@ struct GameOverUI;
 #[derive(Component)]
 struct PauseUI;
 
+/// 帮助UI标记
+#[derive(Component)]
+struct HelpUI;
+
 /// 分数文本标记
 #[derive(Component)]
 pub struct ScoreText;
@@ -852,3 +882,93 @@ pub struct ComboText;
 /// 计时器文本标记
 #[derive(Component)]
 pub struct TimerText;
+
+/// 玩法介绍界面
+fn setup_help(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+            HelpUI,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("HOW TO PLAY"),
+                TextFont { font_size: 36.0, ..default() },
+                TextColor(Color::srgb(1.0, 1.0, 0.0)),
+                Node { margin: UiRect::bottom(Val::Px(20.0)), ..default() },
+            ));
+
+            parent.spawn((
+                Text::new("Arrow Keys: Move left/right to dodge obstacles"),
+                TextFont { font_size: 16.0, ..default() },
+                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                Node { margin: UiRect::bottom(Val::Px(6.0)), ..default() },
+            ));
+
+            parent.spawn((
+                Text::new("Dodge obstacles to build combos and earn higher scores"),
+                TextFont { font_size: 16.0, ..default() },
+                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                Node { margin: UiRect::bottom(Val::Px(16.0)), ..default() },
+            ));
+
+            parent.spawn((
+                Text::new("POWER-UPS"),
+                TextFont { font_size: 24.0, ..default() },
+                TextColor(Color::srgb(1.0, 1.0, 0.0)),
+                Node { margin: UiRect::bottom(Val::Px(12.0)), ..default() },
+            ));
+
+            let powerups: &[(&str, &str)] = &[
+                ("Shield", "Blocks one collision (5s, cyan)"),
+                ("Clear", "Removes all obstacles (instant, orange)"),
+                ("Magnet", "Attracts nearby items (8s, purple)"),
+                ("Slowdown", "Halves obstacle speed (6s, blue)"),
+                ("DoubleScore", "Doubles score gain (10s, gold)"),
+                ("Shrink", "Halves your hitbox (5s, green)"),
+                ("NitroBoost", "Faster lateral movement (3s, orange-red)"),
+            ];
+
+            for (name, desc) in powerups {
+                parent.spawn((
+                    Text::new(format!("{} - {}", name, desc)),
+                    TextFont { font_size: 14.0, ..default() },
+                    TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                    Node { margin: UiRect::bottom(Val::Px(4.0)), ..default() },
+                ));
+            }
+
+            parent.spawn((
+                Text::new("Press ESC to go back"),
+                TextFont { font_size: 14.0, ..default() },
+                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+                Node { margin: UiRect::top(Val::Px(20.0)), ..default() },
+            ));
+        });
+}
+
+/// 清理帮助界面
+fn cleanup_help(mut commands: Commands, query: Query<Entity, With<HelpUI>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+/// 帮助界面系统
+fn help_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        next_state.set(GameState::Menu);
+    }
+}

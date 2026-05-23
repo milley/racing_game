@@ -1,9 +1,9 @@
 {
-  "high_score": 431,
+  "high_score": 540,
   "stats": {
-    "total_games_played": 3,
-    "total_score": 1044,
-    "max_difficulty_reached": 5,
+    "total_games_played": 5,
+    "total_score": 1976,
+    "max_difficulty_reached": 6,
     "powerups_collected": 0,
     "obstacles_dodged": 0
   },
@@ -44,6 +44,11 @@
     "GameOver",
     "FirstBlood",
     "SpeedDemon",
+    "GameOver",
+    "FirstBlood",
+    "SpeedDemon",
+    "GameOver",
+    "FirstBlood",
     "GameOver"
   ],
   "settings": {

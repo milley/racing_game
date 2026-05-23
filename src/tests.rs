@@ -416,7 +416,7 @@ mod tests {
 
         #[test]
         fn test_menu_option_count() {
-            assert_eq!(MENU_OPTION_COUNT, 4);
+            assert_eq!(MENU_OPTION_COUNT, 5);
         }
     }
 
