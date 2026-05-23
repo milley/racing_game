@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use crate::game::{GameState, GameEntity, Difficulty};
+use crate::GameConfig;
 
 /// 玩家实体标记
 #[derive(Component)]
@@ -23,12 +24,6 @@ impl Default for PlayerConfig {
     }
 }
 
-/// 玩家宽度（用于 clamp_player_position 的默认值）
-const PLAYER_WIDTH: f32 = 40.0;
-
-/// 道路宽度
-const ROAD_WIDTH: f32 = 400.0;
-
 /// 限制玩家位置在道路范围内
 pub fn clamp_player_position(x: f32, road_width: f32, player_width: f32) -> f32 {
     let half_road = road_width / 2.0;
@@ -42,6 +37,8 @@ pub fn player_movement(
     mut query: Query<&mut Transform, With<Player>>,
     time: Res<Time>,
     difficulty: Res<Difficulty>,
+    game_config: Res<GameConfig>,
+    player_config: Res<PlayerConfig>,
 ) {
     for mut transform in &mut query {
         let direction = if keyboard.pressed(KeyCode::ArrowLeft) {
@@ -54,17 +51,15 @@ pub fn player_movement(
 
         let speed = 300.0 * difficulty.speed_multiplier;
         let new_x = transform.translation.x + direction * speed * time.delta_secs();
-        transform.translation.x = clamp_player_position(new_x, ROAD_WIDTH, PLAYER_WIDTH);
+        transform.translation.x = clamp_player_position(new_x, game_config.road_width, player_config.width);
     }
 }
 
 /// 创建玩家
 pub fn spawn_player(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
 ) {
     commands.spawn((
-        Sprite::from_image(asset_server.load("player.png")),
         Transform::from_xyz(0.0, -200.0, 1.0),
         Player,
         GameEntity,
