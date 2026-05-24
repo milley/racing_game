@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use crate::game::{GameState, GameEntity, Difficulty};
 use crate::GameConfig;
+use crate::powerup::ActivePowerUps;
 
 /// 玩家实体标记
 #[derive(Component)]
@@ -39,17 +40,24 @@ pub fn player_movement(
     difficulty: Res<Difficulty>,
     game_config: Res<GameConfig>,
     player_config: Res<PlayerConfig>,
+    active_powerups: Res<ActivePowerUps>,
 ) {
     for mut transform in &mut query {
-        let direction = if keyboard.pressed(KeyCode::ArrowLeft) {
+        let direction = if keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::KeyA) {
             -1.0
-        } else if keyboard.pressed(KeyCode::ArrowRight) {
+        } else if keyboard.pressed(KeyCode::ArrowRight) || keyboard.pressed(KeyCode::KeyD) {
             1.0
         } else {
             continue;
         };
 
-        let speed = 300.0 * difficulty.speed_multiplier;
+        let mut speed = 300.0 * difficulty.speed_multiplier;
+
+        // 应用氮气加速
+        if active_powerups.has_nitro {
+            speed *= 1.0 + 0.5; // nitro_speed_boost
+        }
+
         let new_x = transform.translation.x + direction * speed * time.delta_secs();
         transform.translation.x = clamp_player_position(new_x, game_config.road_width, player_config.width);
     }

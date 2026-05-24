@@ -301,13 +301,7 @@ fn update_obstacle_graphics(
     mut commands: Commands,
     config: Res<PixelConfig>,
     obstacle_query: Query<(Entity, &Transform, &CarTypeComponent), (With<Obstacle>, Without<PixelGraphics>)>,
-    existing_graphics_query: Query<&PixelGraphics, With<Obstacle>>,
 ) {
-    // 如果已经有图形的障碍物，跳过
-    if !existing_graphics_query.is_empty() {
-        return;
-    }
-
     let pixel_size = config.pixel_size;
 
     for (entity, _transform, car_type) in obstacle_query.iter() {

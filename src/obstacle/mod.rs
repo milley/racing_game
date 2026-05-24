@@ -10,6 +10,8 @@ use crate::{
     particle::{spawn_explosion, ParticleConfig},
     graphics::CarType,
     road::calculate_curve_offset,
+    audio::{play_collision_sound, play_shield_sound, AudioAssets},
+    settings::GameSettings,
 };
 
 /// 障碍物实体标记（公开供其他模块使用）
@@ -221,6 +223,8 @@ fn check_collisions(
     mut achievement_tracker: ResMut<crate::achievement::AchievementTracker>,
     mut save_data: ResMut<crate::save::SaveData>,
     mut combo: ResMut<Combo>,
+    audio_assets: Res<AudioAssets>,
+    settings: Res<GameSettings>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
@@ -243,6 +247,7 @@ fn check_collisions(
             if active_powerups.has_shield {
                 // 有护盾，销毁障碍物但不受伤
                 spawn_explosion(&mut commands, obstacle_transform.translation, &particle_config);
+                play_shield_sound(&mut commands, &audio_assets, &settings);
                 commands.entity(obstacle_entity).despawn();
                 continue;
             }
@@ -252,6 +257,9 @@ fn check_collisions(
 
             // 生成碰撞粒子效果
             spawn_explosion(&mut commands, player_transform.translation, &particle_config);
+
+            // 播放碰撞音效
+            play_collision_sound(&mut commands, &audio_assets, &settings);
 
             // 销毁障碍物
             commands.entity(obstacle_entity).despawn();

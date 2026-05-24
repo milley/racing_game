@@ -14,6 +14,8 @@ use rand::Rng;
 
 use crate::game::{GameState, GameEntity, Difficulty};
 use crate::player::Player;
+use crate::audio::{play_powerup_sound, play_shield_sound, AudioAssets};
+use crate::settings::GameSettings;
 
 /// 道具插件
 pub struct PowerUpPlugin;
@@ -276,6 +278,8 @@ fn collect_powerups(
     obstacle_query: Query<Entity, With<crate::obstacle::Obstacle>>,
     mut achievement_tracker: ResMut<crate::achievement::AchievementTracker>,
     mut save_data: ResMut<crate::save::SaveData>,
+    audio_assets: Res<AudioAssets>,
+    settings: Res<GameSettings>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
@@ -300,6 +304,7 @@ fn collect_powerups(
                 PowerUpType::Shield => {
                     active_powerups.has_shield = true;
                     active_powerups.shield_timer = config.shield_duration;
+                    play_shield_sound(&mut commands, &audio_assets, &settings);
                 }
                 PowerUpType::Clear => {
                     // 清除所有障碍物
@@ -328,6 +333,9 @@ fn collect_powerups(
                     active_powerups.nitro_timer = config.nitro_duration;
                 }
             }
+
+            // 播放道具收集音效
+            play_powerup_sound(&mut commands, &audio_assets, &settings);
 
             commands.entity(entity).despawn();
         }
