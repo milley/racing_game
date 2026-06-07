@@ -195,16 +195,16 @@ fn move_obstacles(
 
         // 检测闪避：障碍物通过玩家下方且未被标记
         if transform.translation.y < player_y - 30.0 && dodged.is_none() {
-            // 标记为已闪避
-            commands.entity(entity).insert(Dodged);
+            // 标记为已闪避（使用 try_insert 避免实体已被碰撞系统销毁时 panic）
+            commands.entity(entity).try_insert(Dodged);
 
             // 增加连击
             record_dodge(&mut combo);
         }
 
-        // 移出屏幕后删除
+        // 移出屏幕后删除（使用 try_despawn 避免实体已被碰撞系统销毁时警告）
         if transform.translation.y < -400.0 {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }
@@ -248,7 +248,7 @@ fn check_collisions(
                 // 有护盾，销毁障碍物但不受伤
                 spawn_explosion(&mut commands, obstacle_transform.translation, &particle_config);
                 play_shield_sound(&mut commands, &audio_assets, &settings);
-                commands.entity(obstacle_entity).despawn();
+                commands.entity(obstacle_entity).try_despawn();
                 continue;
             }
 
@@ -262,7 +262,7 @@ fn check_collisions(
             play_collision_sound(&mut commands, &audio_assets, &settings);
 
             // 销毁障碍物
-            commands.entity(obstacle_entity).despawn();
+            commands.entity(obstacle_entity).try_despawn();
 
             // 重置连击
             reset_combo_on_collision(&mut combo);

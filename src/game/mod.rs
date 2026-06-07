@@ -481,8 +481,9 @@ fn setup_game(
 /// 清理游戏
 fn cleanup_game(mut commands: Commands, query: Query<Entity, With<GameEntity>>) {
     // 只删除父实体，子实体会自动被递归删除
+    // 使用 try_despawn 避免与 move_obstacles/check_collisions 同帧竞争时警告
     for entity in query.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
 }
 

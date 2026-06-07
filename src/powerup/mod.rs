@@ -309,7 +309,7 @@ fn collect_powerups(
                 PowerUpType::Clear => {
                     // 清除所有障碍物
                     for obstacle_entity in obstacle_query.iter() {
-                        commands.entity(obstacle_entity).despawn();
+                        commands.entity(obstacle_entity).try_despawn();
                     }
                 }
                 PowerUpType::Magnet => {
